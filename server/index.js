@@ -3,6 +3,9 @@ const express = require('express');
 const cors = require('cors');
 const { PrismaClient } = require('@prisma/client');
 
+const authRoutes = require('./routes/auth');
+const tripRoutes = require('./routes/trips');
+
 const app = express();
 const prisma = new PrismaClient();
 
@@ -18,5 +21,8 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 5000;
+app.use('/api/auth', authRoutes);
+app.use('/api/trips', tripRoutes);
+
+const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
