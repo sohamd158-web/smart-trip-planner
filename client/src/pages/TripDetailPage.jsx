@@ -294,13 +294,15 @@ export default function TripDetailPage({ tripId, onBack }) {
     Math.round((totalSpent / Math.max(budget, 1)) * 100)
   );
 
-  const groupedDays = activities.reduce((acc, act) => {
+  const groupedDays = trip.activities.reduce((acc, act) => {
     acc[act.dayNumber] = acc[act.dayNumber] || [];
     acc[act.dayNumber].push(act);
     return acc;
   }, {});
 
-    const UNIQUE_CARD_PHOTOS = [
+  const DISTINCT_PHOTOS = [
+    "https://unsplash.com",
+    "https://unsplash.com",
     "https://unsplash.com",
     "https://unsplash.com",
     "https://unsplash.com",
@@ -318,11 +320,14 @@ export default function TripDetailPage({ tripId, onBack }) {
     "https://unsplash.com",
     "https://unsplash.com"
   ];
-  const combinedPhotos = [...destGallery, ...UNIQUE_CARD_PHOTOS];
+
+  const allUniquePhotos = [...destGallery, ...DISTINCT_PHOTOS];
+  const orderedIds = trip.activities.map((a) => a.id);
+
   const getPhotoForActivity = (act, idx = 0) => {
-    const globalIdx = trip.activities.findIndex((a) => a.id === act.id);
-    const pos = globalIdx >= 0 ? globalIdx : idx;
-    return combinedPhotos[pos % combinedPhotos.length];
+    const seq = orderedIds.indexOf(act.id);
+    const uniqueIndex = seq >= 0 ? seq : (Number(act.dayNumber) - 1) * 2 + idx;
+    return allUniquePhotos[uniqueIndex % allUniquePhotos.length];
   };
 
   const filteredPlaces = (
