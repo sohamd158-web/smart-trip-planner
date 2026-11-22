@@ -2,7 +2,6 @@ const { INDIA_PLACES } = require('../data/indiaPlaces');
 const { WORLD_194_PLACES } = require('../data/world194');
 
 const DISCOVERY_CACHE = new Map();
-const PHOTO_CACHE = new Map();
 
 const COUNTRY_ALIASES = {
   america: "united states",
@@ -18,6 +17,10 @@ const COUNTRY_ALIASES = {
 };
 
 const PHOTO_POOL = [
+  "https://unsplash.com",
+  "https://unsplash.com",
+  "https://unsplash.com",
+  "https://unsplash.com",
   "https://unsplash.com",
   "https://unsplash.com",
   "https://unsplash.com",
@@ -65,7 +68,7 @@ async function fetchJsonFast(url, ms = 2200) {
   try {
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { "User-Agent": "TripSplitAI/3.5 (student-portfolio-app)" }
+      headers: { "User-Agent": "TripSplitAI/4.1 (student-portfolio-app)" }
     });
     clearTimeout(timer);
     return res.ok ? await res.json() : null;
@@ -73,21 +76,6 @@ async function fetchJsonFast(url, ms = 2200) {
     clearTimeout(timer);
     return null;
   }
-}
-
-async function getPlacePhoto(query, index = 0) {
-  const key = query.toLowerCase().trim();
-  if (PHOTO_CACHE.has(key)) return PHOTO_CACHE.get(key);
-
-  const cleanTerm = query.split(",").at(0).trim();
-  const url = "https://wikipedia.org" + encodeURIComponent(cleanTerm) + "&gsrlimit=3&prop=pageimages&piprop=thumbnail&pithumbsize=800&format=json&origin=*";
-  const data = await fetchJsonFast(url, 1800);
-  const pages = data && data.query && data.query.pages ? Object.values(data.query.pages) : [];
-  const withImg = pages.find((p) => p.thumbnail && p.thumbnail.source);
-
-  const photo = (withImg && withImg.thumbnail.source) || PHOTO_POOL[index % PHOTO_POOL.length];
-  PHOTO_CACHE.set(key, photo);
-  return photo;
 }
 
 async function resolveDestination(destination) {
@@ -136,7 +124,7 @@ async function resolveDestination(destination) {
   return null;
 }
 
-async function getWikiLandmarksWithPhotos(lat, lng, anchorName) {
+async function getWikiLandmarks(lat, lng, anchorName) {
   const url = "https://wikipedia.org" + lat + "|" + lng + "&ggsradius=10000&ggslimit=16&prop=pageimages|extracts&piprop=thumbnail&pithumbsize=700&exintro=1&explaintext=1&exsentences=1&format=json&origin=*";
   const data = await fetchJsonFast(url, 2200);
   const pages = data && data.query && data.query.pages ? Object.values(data.query.pages) : [];
@@ -145,7 +133,7 @@ async function getWikiLandmarksWithPhotos(lat, lng, anchorName) {
     .filter((p) => p.title && !p.title.toLowerCase().includes("district") && !p.title.toLowerCase().includes("constituency") && !p.title.toLowerCase().includes("election"))
     .slice(0, 12)
     .map((p, i) => {
-      const km = Math.max(2, (i + 1) * 5);
+      const km = Math.max(2, (i + 1) * 6);
       return {
         city: anchorName,
         title: p.title,
@@ -154,28 +142,34 @@ async function getWikiLandmarksWithPhotos(lat, lng, anchorName) {
         food: "Local Regional Specialties",
         distanceKm: km,
         distanceLabel: km + " km from " + anchorName,
-        imageUrl: (p.thumbnail && p.thumbnail.source) || PHOTO_POOL[(i + 3) % PHOTO_POOL.length],
+        imageUrl: (p.thumbnail && p.thumbnail.source) || PHOTO_POOL[(i + 2) % PHOTO_POOL.length],
         notes: p.extract ? p.extract.slice(0, 115) : "Verified landmark & cultural site near " + anchorName
       };
     });
 }
 
-function buildDiverseRegionalStops(anchorName, countryName, heroPhoto) {
+function build24UniqueStops(anchorName, countryName) {
   const templates = [
-    ["Historic Old Quarter & Heritage Walk", "Heritage", 950, 0, "Guided walking tour through iconic historic squares and architecture"],
-    ["Signature Street Food & Night Bazaar", "Food", 1150, 4, "Taste famous regional dishes, street snacks, and local desserts"],
-    ["Central Botanical Gardens & Waterfront", "Nature", 850, 6, "Morning stroll along scenic gardens and river/harbor promenade"],
-    ["National Art & History Museum Quarter", "Culture", 1300, 8, "Explore centuries of art, royal artifacts, and local heritage"],
-    ["Panoramic Sunset Hilltop Overlook", "Sightseeing", 1200, 22, "Golden-hour panoramic views over the valley and city skyline"],
-    ["Suburban Waterfall & Forest Trail", "Adventure", 1750, 48, "Half-day nature hike through shaded forest trails and cascades"],
-    ["Artisan Craft Village & Pottery Market", "Culture", 1400, 75, "Meet local weavers, potters, and traditional craft workshops"],
-    ["Royal Citadel & Hilltop Fortress Excursion", "Heritage", 2100, 115, "Full-day excursion to medieval stone ramparts and watchtowers"],
-    ["Lakeside Boating & Vineyard / Orchard Picnic", "Nature", 2300, 155, "Relaxing afternoon boat ride and farm-to-table regional lunch"],
-    ["Regional Wildlife Sanctuary Jeep Safari", "Wildlife", 3100, 210, "Early morning guided wildlife spotting in protected reserve"],
-    ["Mountain Pass / Coastal Cliff Scenic Drive", "Adventure", 2750, 265, "Full-day highway road trip with dramatic scenic lookouts"],
-    ["Ancient Temple / Abbey & Sacred Ghats", "Culture", 1900, 310, "Explore centuries-old spiritual architecture and evening ceremonies"],
-    ["Highland Valley & Hot Springs Retreat", "Nature", 2900, 350, "Rejuvenating day trip to thermal springs and alpine meadows"],
-    ["Borderland Heritage Town & Culinary Trail", "Food", 2600, 390, "Discover cross-regional cuisine and historic trading posts"]
+    ["Historic Old Quarter & Architecture Walk", "Heritage", 950, 0, "Guided walking tour through iconic historic squares and monuments"],
+    ["Famous Street Food & Night Market Crawl", "Food", 1150, 3, "Sample signature regional dishes, street snacks, and local desserts"],
+    ["Central Botanical Gardens & Waterfront", "Nature", 850, 5, "Morning stroll along scenic gardens and river/harbor promenade"],
+    ["National Art & History Museum Quarter", "Culture", 1300, 7, "Explore centuries of art, royal artifacts, and local heritage"],
+    ["Panoramic Sunset Hilltop Overlook", "Sightseeing", 1200, 18, "Golden-hour panoramic views over the valley and city skyline"],
+    ["Suburban Waterfall & Forest Trail", "Adventure", 1750, 42, "Half-day nature hike through shaded forest trails and cascades"],
+    ["Artisan Craft Village & Pottery Market", "Culture", 1400, 65, "Meet local weavers, potters, and traditional craft workshops"],
+    ["Royal Citadel & Hilltop Fortress Excursion", "Heritage", 2100, 95, "Full-day excursion to medieval stone ramparts and watchtowers"],
+    ["Lakeside Boating & Vineyard / Orchard Picnic", "Nature", 2300, 130, "Relaxing afternoon boat ride and farm-to-table regional lunch"],
+    ["Regional Wildlife Sanctuary Jeep Safari", "Wildlife", 3100, 165, "Early morning guided wildlife spotting in protected reserve"],
+    ["Scenic Canyon / Coastal Cliff Drive", "Adventure", 2750, 205, "Full-day highway road trip with dramatic scenic lookouts"],
+    ["Ancient Abbey / Temple & Sacred Precinct", "Culture", 1900, 240, "Explore centuries-old spiritual architecture and evening ceremonies"],
+    ["Highland Valley & Thermal Hot Springs", "Nature", 2900, 275, "Rejuvenating day trip to natural springs and alpine meadows"],
+    ["Historic Railway & Mountain Ridge Town", "Sightseeing", 2500, 305, "Heritage scenic train ride and charming colonial town walk"],
+    ["Coastal Lighthouse & Hidden Cove Kayaking", "Adventure", 2650, 330, "Sea kayaking along rocky coves and historic coastal lighthouse"],
+    ["Traditional Culinary Farm & Cooking Workshop", "Food", 1850, 345, "Hands-on regional cooking class with fresh farm ingredients"],
+    ["UNESCO Archaeological Ruins & Amphitheater", "Heritage", 2400, 360, "Explore ancient stone ruins, columns, and open-air museum"],
+    ["Borderland Trading Post & Cultural Bazaar", "Food", 2200, 375, "Discover cross-regional cuisine and historic merchant quarters"],
+    ["Alpine Observatory & Stargazing Ridge", "Nature", 2800, 385, "Clear-sky night astronomy session and high-altitude sunset"],
+    ["River Gorge Suspension Bridge & Eco-Park", "Adventure", 2150, 395, "Canopy walk across dramatic river gorge and botanical reserve"]
   ];
 
   return templates.map(([suffix, category, cost, km, desc], idx) => ({
@@ -186,7 +180,7 @@ function buildDiverseRegionalStops(anchorName, countryName, heroPhoto) {
     food: "Authentic " + countryName + " Cuisine",
     distanceKm: km,
     distanceLabel: km === 0 ? "In " + anchorName : km + " km from " + anchorName,
-    imageUrl: idx === 0 ? heroPhoto : PHOTO_POOL[idx % PHOTO_POOL.length],
+    imageUrl: PHOTO_POOL[idx % PHOTO_POOL.length],
     notes: desc
   }));
 }
@@ -197,15 +191,13 @@ async function discoverWithin400Km(destination, preferences = "") {
 
   const prefGeo = preferences && preferences.trim().length > 2 ? await resolveDestination(preferences) : null;
   const geo = prefGeo || (await resolveDestination(destination));
-  const activeQuery = prefGeo ? preferences.trim() : destination;
-  const targetCountry = (geo && geo.country) || activeQuery;
-  const anchorName = (geo && geo.name) || activeQuery;
 
-  const [heroPhoto, weatherData, wikiPlaces] = await Promise.all([
-    getPlacePhoto(anchorName + " landmark", 0),
-
+const activeQuery = prefGeo ? preferences.trim() : destination;
+const targetCountry = (geo && geo.country) || activeQuery;
+const anchorName = (geo && geo.name) || activeQuery;
+const [weatherData, wikiPlaces] = await Promise.all([
 geo ? fetchJsonFast("open-meteo.com" + geo.lat + "&longitude=" + geo.lng + "&current_weather=true", 1800) : Promise.resolve(null),
-geo ? getWikiLandmarksWithPhotos(geo.lat, geo.lng, anchorName) : Promise.resolve([])
+geo ? getWikiLandmarks(geo.lat, geo.lng, anchorName) : Promise.resolve([])
 ]);
 let curatedNearby = [];
 if (geo) {
@@ -218,22 +210,17 @@ distanceLabel: distKm === 0 ? "In " + geo.name : distKm + " km from " + geo.name
 imageUrl: PHOTO_POOL[idx % PHOTO_POOL.length]
 };
 }).filter((p) => p.distanceKm <= 400);
-await Promise.all(
-curatedNearby.slice(0, 6).map(async (item, i) => {
-item.imageUrl = await getPlacePhoto(item.city + " " + item.category, i);
-})
-);
 }
-const fallbackDiverse = buildDiverseRegionalStops(anchorName, targetCountry, heroPhoto);
+const diverseStops = build24UniqueStops(anchorName, targetCountry);
 const seen = new Set();
-let places = [...curatedNearby, ...wikiPlaces, ...fallbackDiverse]
+let places = [...curatedNearby, ...wikiPlaces, ...diverseStops]
 .filter((item) => {
 const key = item.title.toLowerCase();
 if (seen.has(key)) return false;
 seen.add(key);
 return true;
 })
-.slice(0, 18)
+.slice(0, 28)
 .sort((a, b) => a.distanceKm - b.distanceKm);
 if (preferences && preferences.trim() && !prefGeo) {
 const words = preferences.toLowerCase().split(/[\s,]+/).filter(Boolean);
@@ -286,7 +273,6 @@ detail: isIndia
 const result = {
 destination: anchorName,
 country: targetCountry,
-heroImage: heroPhoto,
 weather: weatherText,
 currency,
 radiusKm: 400,
@@ -299,22 +285,35 @@ return result;
 }
 async function generateGeoItinerary(destination, days, budget, preferences) {
 const discovery = await discoverWithin400Km(destination, preferences);
-const pool = discovery.nearbyPlaces;
+const pool = [...discovery.nearbyPlaces];
 const totalActivities = days * 2;
 const budgetScale = budget > 0 ? Math.min(1.4, Math.max(0.65, budget / (totalActivities * 1500))) : 1;
+// Strictly pick unique non-repeating stops without wrapping around
 const schedule = [];
+const usedTitles = new Set();
 for (let i = 0; i < totalActivities; i++) {
-const place = pool[i % pool.length];
 const dayNumber = Math.floor(i / 2) + 1;
+let place = pool[i];
+if (!place || usedTitles.has(place.title.toLowerCase())) {
+place = {
+title: discovery.destination + " — Day " + dayNumber + " Regional Expedition #" + (i + 1),
+category: i % 2 === 0 ? "Adventure" : "Culture",
+cost: 1800 + (i % 5) * 300,
+distanceLabel: Math.min(395, 25 + i * 18) + " km from " + discovery.destination,
+notes: "Curated regional sightseeing & cultural stop within 400 km radius",
+imageUrl: PHOTO_POOL[i % PHOTO_POOL.length]
+};
+}
+usedTitles.add(place.title.toLowerCase());
 schedule.push({
 dayNumber,
 title: place.title,
 category: place.category,
 estimatedCost: Math.round((place.cost * budgetScale) / 50) * 50,
 notes: place.distanceLabel + " • " + place.notes,
-imageUrl: place.imageUrl
+imageUrl: PHOTO_POOL[i % PHOTO_POOL.length]
 });
 }
 return schedule;
 }
-module.exports = { discoverWithin400Km, generateGeoItinerary, getPlacePhoto };
+module.exports = { discoverWithin400Km, generateGeoItinerary };

@@ -300,18 +300,27 @@ export default function TripDetailPage({ tripId, onBack }) {
     return acc;
   }, {});
 
-  const UNIQUE_CARD_PHOTOS = Object.values(FALLBACK_PHOTOS);
+    const UNIQUE_CARD_PHOTOS = [
+    "https://images.unsplash.com/photo-1524492412937-b28074a5d7da?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1548013146-72479768bada?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1516426122078-c23e76319801?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1501785888041-af3ef285b470?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1533105079780-92b9be482077?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1499856871958-5b9627545d1a?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=600&q=80"
+  ];
   const getPhotoForActivity = (act, idx = 0) => {
-    const match = (discoverData?.nearbyPlaces || []).find(
-      (p) =>
-        p.title?.toLowerCase() === act.title?.toLowerCase()
-    );
-
-    return (
-      match?.imageUrl ||
-      FALLBACK_PHOTOS[act.category] ||
-      FALLBACK_PHOTOS.Sightseeing
-    );
+    const slot = ((Number(act.dayNumber) - 1) * 2 + idx) % UNIQUE_CARD_PHOTOS.length;
+    return UNIQUE_CARD_PHOTOS[slot];
   };
 
   const filteredPlaces = (
@@ -345,13 +354,9 @@ export default function TripDetailPage({ tripId, onBack }) {
 
       {/* ================= HEADER ================= */}
 
-      <div className="relative h-56 bg-slate-900 overflow-hidden">
+      <div className="relative h-48 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 overflow-hidden">
 
-        <img
-          src={discoverData?.heroImage || FALLBACK_PHOTOS.Nature}
-          alt={trip.destination}
-          className="w-full h-full object-cover opacity-65"
-        />
+        
 
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-900/40 to-transparent" />
 
