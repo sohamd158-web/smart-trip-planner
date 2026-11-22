@@ -2,7 +2,6 @@ const { INDIA_PLACES } = require('../data/indiaPlaces');
 const { WORLD_194_PLACES } = require('../data/world194');
 
 const DISCOVERY_CACHE = new Map();
-const PHOTO_CACHE = new Map();
 
 const COUNTRY_ALIASES = {
   america: "united states",
@@ -18,8 +17,6 @@ const COUNTRY_ALIASES = {
 };
 
 const PHOTO_POOL = [
-  "https://unsplash.com",
-  "https://unsplash.com",
   "https://unsplash.com",
   "https://unsplash.com",
   "https://unsplash.com",
@@ -67,7 +64,7 @@ async function fetchJsonFast(url, ms = 2200) {
   try {
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { "User-Agent": "TripSplitAI/4.5 (student-portfolio-app)" }
+      headers: { "User-Agent": "TripSplitAI/5.0 (student-portfolio-app)" }
     });
     clearTimeout(timer);
     return res.ok ? await res.json() : null;
@@ -77,47 +74,50 @@ async function fetchJsonFast(url, ms = 2200) {
   }
 }
 
-async function getRealWikiPhoto(query, fallbackIndex = 0) {
-  const key = query.toLowerCase().trim();
-  if (PHOTO_CACHE.has(key)) return PHOTO_CACHE.get(key);
-
-  const url = "https://wikipedia.org" + encodeURIComponent(query) + "&gsrlimit=4&prop=pageimages&piprop=thumbnail&pithumbsize=700&format=json&origin=*";
-  const data = await fetchJsonFast(url, 1800);
-  const pages = data && data.query && data.query.pages ? Object.values(data.query.pages) : [];
-  const match = pages.find((p) => p.thumbnail && p.thumbnail.source && !p.thumbnail.source.includes(".svg"));
-
-  const photo = (match && match.thumbnail.source) || PHOTO_POOL[fallbackIndex % PHOTO_POOL.length];
-  PHOTO_CACHE.set(key, photo);
-  return photo;
-}
-
 async function resolveDestination(destination) {
   let clean = destination.trim().toLowerCase();
   if (COUNTRY_ALIASES[clean]) clean = COUNTRY_ALIASES[clean];
-  const primaryPart = clean.split(",").at(0).trim();
-  const resolvedTerm = COUNTRY_ALIASES[primaryPart] || primaryPart;
+  const tokens = clean.split(/[\s,/-]+/).filter((w) => w.length > 2);
 
-  const localMatch = ALL_PLACES.find(
-    (p) =>
-      resolvedTerm.includes(p.city.toLowerCase()) ||
-      clean.includes(p.city.toLowerCase()) ||
-      clean.includes(p.country.toLowerCase()) ||
-      resolvedTerm === p.country.toLowerCase() ||
-      p.city.toLowerCase().includes(resolvedTerm)
-  );
-  if (localMatch) {
+  // 1. Exact city match first (supports "Narkanda Shimla", "Shimla, Narkanda", etc.)
+  const cityMatch = ALL_PLACES.find((p) => {
+    const c = p.city.toLowerCase();
+    return clean === c || tokens.includes(c) || clean.includes(c);
+  });
+  if (cityMatch) {
     return {
-      name: localMatch.city,
-      country: localMatch.country,
-      lat: localMatch.lat,
-      lng: localMatch.lng,
-      currency: localMatch.currency,
-      dialCode: localMatch.dialCode
+      name: cityMatch.city,
+      state: cityMatch.state || cityMatch.country,
+      country: cityMatch.country,
+      lat: cityMatch.lat,
+      lng: cityMatch.lng,
+      currency: cityMatch.currency,
+      dialCode: cityMatch.dialCode,
+      matchedTokens: tokens
     };
   }
 
+  // 2. Country match (all 195 countries)
+  const countryMatch = ALL_PLACES.find((p) => {
+    const co = p.country.toLowerCase();
+    return clean === co || tokens.includes(co) || clean.includes(co);
+  });
+  if (countryMatch) {
+    return {
+      name: countryMatch.city,
+      state: countryMatch.state || countryMatch.country,
+      country: countryMatch.country,
+      lat: countryMatch.lat,
+      lng: countryMatch.lng,
+      currency: countryMatch.currency,
+      dialCode: countryMatch.dialCode,
+      matchedTokens: tokens
+    };
+  }
+
+  // 3. Live OpenStreetMap Nominatim lookup for any smaller town worldwide
   const osmRes = await fetchJsonFast(
-    "https://openstreetmap.org" + encodeURIComponent(resolvedTerm) + "&format=json&addressdetails=1&limit=1",
+    "https://openstreetmap.org" + encodeURIComponent(destination) + "&format=json&addressdetails=1&limit=1",
     2000
   );
   const top = Array.isArray(osmRes) ? osmRes.at(0) : null;
@@ -125,12 +125,14 @@ async function resolveDestination(destination) {
     const countryName = (top.address && top.address.country) || destination;
     const countryMeta = WORLD_194_PLACES.find((w) => w.country.toLowerCase() === countryName.toLowerCase());
     return {
-      name: top.name || resolvedTerm,
+      name: top.name || destination,
+      state: (top.address && top.address.state) || countryName,
       country: countryName,
       lat: parseFloat(top.lat),
       lng: parseFloat(top.lon),
       currency: (countryMeta && countryMeta.currency) || "Local Currency",
-      dialCode: (countryMeta && countryMeta.dialCode) || ""
+      dialCode: (countryMeta && countryMeta.dialCode) || "",
+      matchedTokens: tokens
     };
   }
 
@@ -138,7 +140,7 @@ async function resolveDestination(destination) {
 }
 
 async function getWikiLandmarks(lat, lng, anchorName) {
-  const url = "https://wikipedia.org" + lat + "|" + lng + "&ggsradius=10000&ggslimit=25&prop=pageimages|extracts&piprop=thumbnail&pithumbsize=700&exintro=1&explaintext=1&exsentences=1&format=json&origin=*";
+  const url = "https://wikipedia.org" + lat + "|" + lng + "&ggsradius=10000&ggslimit=20&prop=pageimages|extracts&piprop=thumbnail&pithumbsize=700&exintro=1&explaintext=1&exsentences=1&format=json&origin=*";
   const data = await fetchJsonFast(url, 2400);
   const pages = data && data.query && data.query.pages ? Object.values(data.query.pages) : [];
 
@@ -147,109 +149,92 @@ async function getWikiLandmarks(lat, lng, anchorName) {
       const t = (p.title || "").toLowerCase();
       return t && !t.includes("district") && !t.includes("constituency") && !t.includes("election") && !t.includes("list of");
     })
-    .slice(0, 18)
+    .slice(0, 12)
     .map((p, i) => {
-      const km = Math.max(2, (i + 1) * 5);
-      const validThumb = p.thumbnail && p.thumbnail.source && !p.thumbnail.source.includes(".svg") ? p.thumbnail.source : null;
+      const km = Math.max(2, (i + 1) * 4);
       return {
         city: anchorName,
         title: p.title,
         category: i % 3 === 0 ? "Landmark" : i % 3 === 1 ? "Culture" : "Sightseeing",
-        cost: 1100 + (i % 5) * 350,
+        cost: 1100 + (i % 4) * 300,
         food: "Local Regional Specialties",
         distanceKm: km,
         distanceLabel: km + " km from " + anchorName,
-        imageUrl: validThumb || PHOTO_POOL[i % PHOTO_POOL.length],
-        notes: p.extract ? p.extract.slice(0, 115) : "Verified landmark & cultural site near " + anchorName
+        imageUrl: PHOTO_POOL[i % PHOTO_POOL.length],
+        notes: p.extract ? p.extract.slice(0, 115) : "Verified landmark & scenic spot near " + anchorName
       };
     });
 }
 
-function build20UniqueStops(anchorName, countryName) {
+function buildLocalRegionalStops(anchorName, countryName) {
   const templates = [
-    ["Historic Old Quarter & Architecture Walk", "Heritage", 950, 0, "Guided walking tour through iconic historic squares and monuments"],
-    ["Famous Street Food & Night Market Crawl", "Food", 1150, 3, "Sample signature regional dishes, street snacks, and local desserts"],
-    ["Central Botanical Gardens & Waterfront", "Nature", 850, 5, "Morning stroll along scenic gardens and river/harbor promenade"],
-    ["National Art & History Museum Quarter", "Culture", 1300, 7, "Explore centuries of art, royal artifacts, and local heritage"],
-    ["Panoramic Sunset Hilltop Overlook", "Sightseeing", 1200, 18, "Golden-hour panoramic views over the valley and city skyline"],
-    ["Suburban Waterfall & Forest Trail", "Adventure", 1750, 42, "Half-day nature hike through shaded forest trails and cascades"],
-    ["Artisan Craft Village & Pottery Market", "Culture", 1400, 65, "Meet local weavers, potters, and traditional craft workshops"],
-    ["Royal Citadel & Hilltop Fortress Excursion", "Heritage", 2100, 95, "Full-day excursion to medieval stone ramparts and watchtowers"],
-    ["Lakeside Boating & Vineyard / Orchard Picnic", "Nature", 2300, 130, "Relaxing afternoon boat ride and farm-to-table regional lunch"],
-    ["Regional Wildlife Sanctuary Jeep Safari", "Wildlife", 3100, 165, "Early morning guided wildlife spotting in protected reserve"],
-    ["Scenic Canyon / Coastal Cliff Drive", "Adventure", 2750, 205, "Full-day highway road trip with dramatic scenic lookouts"],
-    ["Ancient Abbey / Temple & Sacred Precinct", "Culture", 1900, 240, "Explore centuries-old spiritual architecture and evening ceremonies"],
-    ["Highland Valley & Thermal Hot Springs", "Nature", 2900, 275, "Rejuvenating day trip to natural springs and alpine meadows"],
-    ["Historic Railway & Mountain Ridge Town", "Sightseeing", 2500, 305, "Heritage scenic train ride and charming colonial town walk"],
-    ["Coastal Lighthouse & Hidden Cove Kayaking", "Adventure", 2650, 330, "Sea kayaking along rocky coves and historic coastal lighthouse"],
-    ["Traditional Culinary Farm & Cooking Workshop", "Food", 1850, 345, "Hands-on regional cooking class with fresh farm ingredients"],
-    ["UNESCO Archaeological Ruins & Amphitheater", "Heritage", 2400, 360, "Explore ancient stone ruins, columns, and open-air museum"],
-    ["Borderland Trading Post & Cultural Bazaar", "Food", 2200, 375, "Discover cross-regional cuisine and historic merchant quarters"],
-    ["Alpine Observatory & Stargazing Ridge", "Nature", 2800, 385, "Clear-sky night astronomy session and high-altitude sunset"],
-    ["River Gorge Suspension Bridge & Eco-Park", "Adventure", 2150, 395, "Canopy walk across dramatic river gorge and botanical reserve"]
+    ["Historic Old Quarter & Ridge Walk", "Heritage", 950, 0, "Guided walking tour through iconic viewpoints and heritage streets"],
+    ["Famous Local Food & Bazaar Trail", "Food", 1150, 3, "Sample signature regional dishes, street snacks, and local sweets"],
+    ["Panoramic Sunset Peak & Valley Viewpoint", "Sightseeing", 1200, 12, "Golden-hour panoramic views over the surrounding hills and valleys"],
+    ["Cedar / Pine Forest Nature Trail", "Nature", 1350, 24, "Morning nature walk through scenic forest trails and meadows"],
+    ["Suburban Waterfall & Gorge Hike", "Adventure", 1750, 42, "Half-day trek to cascading waterfalls and rocky gorges"],
+    ["Artisan Craft Village & Heritage Temple", "Culture", 1400, 58, "Explore traditional wooden architecture and local craft workshops"],
+    ["Hilltop Fortress & Palace Excursion", "Heritage", 2100, 85, "Full-day excursion to historic royal summer retreat and gardens"],
+    ["Lakeside Boating & Orchard Picnic", "Nature", 2300, 115, "Relaxing afternoon by the alpine/scenic lake and local orchards"],
+    ["High-Altitude Pass & Scenic Ridge Drive", "Adventure", 2750, 155, "Full-day mountain highway drive with dramatic snow/valley lookouts"],
+    ["Regional Wildlife Sanctuary Safari", "Wildlife", 3100, 195, "Early morning guided wildlife spotting in protected reserve"]
   ];
 
   return templates.map(([suffix, category, cost, km, desc], idx) => ({
     city: anchorName,
+    title: anchorName + " — " + suffix,
+    category,
+    cost,
+    food: "Authentic " + countryName + " Cuisine",
+    distanceKm: km,
+    distanceLabel: km === 0 ? "In " + anchorName : km + " km from " + anchorName,
+    imageUrl: PHOTO_POOL[idx % PHOTO_POOL.length],
+    notes: desc
+  }));
+}
 
-title: anchorName + " — " + suffix,
-category,
-cost,
-food: "Authentic " + countryName + " Cuisine",
-distanceKm: km,
-distanceLabel: km === 0 ? "In " + anchorName : km + " km from " + anchorName,
-imageUrl: PHOTO_POOL[idx % PHOTO_POOL.length],
-notes: desc
-}));
-}
 async function discoverWithin400Km(destination, preferences = "") {
-const cacheKey = destination.toLowerCase().trim() + "::" + preferences.toLowerCase().trim();
-if (DISCOVERY_CACHE.has(cacheKey)) return DISCOVERY_CACHE.get(cacheKey);
-const prefGeo = preferences && preferences.trim().length > 2 ? await resolveDestination(preferences) : null;
-const geo = prefGeo || (await resolveDestination(destination));
-const activeQuery = prefGeo ? preferences.trim() : destination;
-const targetCountry = (geo && geo.country) || activeQuery;
-const anchorName = (geo && geo.name) || activeQuery;
-const [weatherData, wikiPlaces] = await Promise.all([
-geo ? fetchJsonFast("open-meteo.com" + geo.lat + "&longitude=" + geo.lng + "&current_weather=true", 1800) : Promise.resolve(null),
-geo ? getWikiLandmarks(geo.lat, geo.lng, anchorName) : Promise.resolve([])
-]);
-let curatedNearby = [];
-if (geo) {
-curatedNearby = ALL_PLACES.map((p, idx) => {
-const distKm = p.city.toLowerCase() === geo.name.toLowerCase() ? 0 : haversineRoadKm(geo.lat, geo.lng, p.lat, p.lng);
-return {
-...p,
-distanceKm: distKm,
-distanceLabel: distKm === 0 ? "In " + geo.name : distKm + " km from " + geo.name,
-imageUrl: PHOTO_POOL[idx % PHOTO_POOL.length]
+  const combinedQuery = preferences && preferences.trim() ? destination + " " + preferences : destination;
+  const cacheKey = combinedQuery.toLowerCase().trim();
+  if (DISCOVERY_CACHE.has(cacheKey)) return DISCOVERY_CACHE.get(cacheKey);
+
+  const geo = await resolveDestination(combinedQuery);
+  const targetCountry = (geo && geo.country) || destination;
+  const anchorName = (geo && geo.name) || destination;
+  const allTokens = combinedQuery.toLowerCase().split(/[\s,/-]+/).filter((w) => w.length > 2);
+
+  const [weatherData, wikiPlaces] = await Promise.all([
+    geo ? fetchJsonFast("https://open-meteo.com" + geo.lat + "&longitude=" + geo.lng + "&current_weather=true", 1800) : Promise.resolve(null),
+    geo ? getWikiLandmarks(geo.lat, geo.lng, anchorName) : Promise.resolve([])
+  ]);
+
+  let curatedNearby = [];
+  if (geo) {
+    curatedNearby = ALL_PLACES.map((p, idx) => {
+      const distKm = p.city.toLowerCase() === geo.name.toLowerCase() ? 0 : haversineRoadKm(geo.lat, geo.lng, p.lat, p.lng);
+      const tokenBoost = allTokens.some((t) => p.city.toLowerCase().includes(t) || p.title.toLowerCase().includes(t)) ? 0 : 1;
+      const sameStateBoost = geo.state && p.state && p.state.toLowerCase() === geo.state.toLowerCase() ? 0 : 1;
+      return {
+        ...p,
+        distanceKm: distKm,
+        distanceLabel: distKm === 0 ? "In " + geo.name : distKm + " km from " + geo.name,
+        imageUrl: PHOTO_POOL[idx % PHOTO_POOL.length],
+_rank: tokenBoost * 1000 + sameStateBoost * 300 + distKm
 };
-}).filter((p) => p.distanceKm <= 400);
-await Promise.all(
-curatedNearby.slice(0, 8).map(async (item, i) => {
-item.imageUrl = await getRealWikiPhoto(item.city + " " + item.country, i);
 })
-);
+.filter((p) => p.distanceKm <= 400)
+.sort((a, b) => a._rank - b._rank);
 }
-const diverseStops = build20UniqueStops(anchorName, targetCountry);
+const localStops = buildLocalRegionalStops(anchorName, targetCountry);
 const seen = new Set();
-// Prioritize real curated places & real Wikipedia landmarks first, then diverse regional stops
-let places = [...curatedNearby, ...wikiPlaces, ...diverseStops]
+const places = [...curatedNearby, ...wikiPlaces, ...localStops]
 .filter((item) => {
 const key = item.title.toLowerCase();
 if (seen.has(key)) return false;
 seen.add(key);
 return true;
 })
-.slice(0, 30);
-if (preferences && preferences.trim() && !prefGeo) {
-const words = preferences.toLowerCase().split(/[\s,]+/).filter(Boolean);
-places.sort((a, b) => {
-const aMatch = words.some((w) => (a.title + " " + a.category + " " + a.notes).toLowerCase().includes(w)) ? 0 : 1;
-const bMatch = words.some((w) => (b.title + " " + b.category + " " + b.notes).toLowerCase().includes(w)) ? 0 : 1;
-return aMatch - bMatch;
-});
-}
+.slice(0, 26);
 const temp = weatherData && weatherData.current_weather ? weatherData.current_weather.temperature : undefined;
 const weatherText = temp !== undefined ? temp + "°C • Wind " + weatherData.current_weather.windspeed + " km/h" : "Check forecast";
 const isIndia = targetCountry.toLowerCase() === "india";
@@ -315,11 +300,11 @@ const dayNumber = Math.floor(i / 2) + 1;
 let place = pool[i];
 if (!place || usedTitles.has(place.title.toLowerCase())) {
 place = {
-title: discovery.destination + " — Day " + dayNumber + " Regional Expedition #" + (i + 1),
+title: discovery.destination + " — Day " + dayNumber + " Scenic Hill & Valley Stop #" + (i + 1),
 category: i % 2 === 0 ? "Adventure" : "Culture",
-cost: 1800 + (i % 5) * 300,
-distanceLabel: Math.min(395, 25 + i * 18) + " km from " + discovery.destination,
-notes: "Curated regional sightseeing & cultural stop within 400 km radius",
+cost: 1600 + (i % 5) * 250,
+distanceLabel: Math.min(280, 15 + i * 14) + " km from " + discovery.destination,
+notes: "Curated regional sightseeing & cultural stop around " + discovery.destination,
 imageUrl: PHOTO_POOL[i % PHOTO_POOL.length]
 };
 }
