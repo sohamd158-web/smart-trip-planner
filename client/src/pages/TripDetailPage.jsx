@@ -33,7 +33,6 @@ export default function TripDetailPage({ tripId, onBack }) {
   const [trip, setTrip] = useState(null);
   const [settlementData, setSettlementData] = useState(null);
   const [discoverData, setDiscoverData] = useState(null);
-  const [activityPhotos, setActivityPhotos] = useState({});
 
   const [activeTab, setActiveTab] = useState("itinerary");
   const [distanceFilter, setDistanceFilter] = useState("all");
@@ -302,27 +301,28 @@ export default function TripDetailPage({ tripId, onBack }) {
   }, {});
 
     const UNIQUE_CARD_PHOTOS = [
-    "https://images.unsplash.com/photo-1524492412937-b28074a5d7da?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1548013146-72479768bada?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1516426122078-c23e76319801?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1501785888041-af3ef285b470?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1533105079780-92b9be482077?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1499856871958-5b9627545d1a?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=600&q=80"
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com"
   ];
+  const combinedPhotos = [...destGallery, ...UNIQUE_CARD_PHOTOS];
   const getPhotoForActivity = (act, idx = 0) => {
-    const slot = ((Number(act.dayNumber) - 1) * 2 + idx) % UNIQUE_CARD_PHOTOS.length;
-    const discMatch = (discoverData?.nearbyPlaces || []).find((p) => p.title.toLowerCase() === act.title.toLowerCase());
-    return activityPhotos[act.id] || (discMatch && discMatch.imageUrl) || UNIQUE_CARD_PHOTOS[slot];
+    const globalIdx = trip.activities.findIndex((a) => a.id === act.id);
+    const pos = globalIdx >= 0 ? globalIdx : idx;
+    return combinedPhotos[pos % combinedPhotos.length];
   };
 
   const filteredPlaces = (
