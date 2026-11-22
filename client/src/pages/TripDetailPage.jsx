@@ -294,23 +294,40 @@ export default function TripDetailPage({ tripId, onBack }) {
     Math.round((totalSpent / Math.max(budget, 1)) * 100)
   );
 
-  const groupedDays = activities.reduce((acc, act) => {
+  const groupedDays = trip.activities.reduce((acc, act) => {
     acc[act.dayNumber] = acc[act.dayNumber] || [];
     acc[act.dayNumber].push(act);
     return acc;
   }, {});
 
-  const getPhotoForActivity = (act) => {
-    const match = (discoverData?.nearbyPlaces || []).find(
-      (p) =>
-        p.title?.toLowerCase() === act.title?.toLowerCase()
-    );
+  const VERSATILE_PHOTOS = [
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com",
+    "https://unsplash.com"
+  ];
 
-    return (
-      match?.imageUrl ||
-      FALLBACK_PHOTOS[act.category] ||
-      FALLBACK_PHOTOS.Sightseeing
-    );
+  const allDistinctPhotos = [...destGallery, ...VERSATILE_PHOTOS];
+  const allActivityIds = trip.activities.map((a) => a.id);
+
+  const getPhotoForActivity = (act) => {
+    const pos = allActivityIds.indexOf(act.id);
+    const index = pos >= 0 ? pos : Number(act.dayNumber) || 0;
+    return allDistinctPhotos[index % allDistinctPhotos.length];
   };
 
   const filteredPlaces = (
@@ -341,13 +358,9 @@ export default function TripDetailPage({ tripId, onBack }) {
 
       {/* ================= HEADER ================= */}
 
-      <div className="relative h-56 bg-slate-900 overflow-hidden">
+      <div className="relative h-48 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 overflow-hidden">
 
-        <img
-          src={discoverData?.heroImage || FALLBACK_PHOTOS.Nature}
-          alt={trip.destination}
-          className="w-full h-full object-cover opacity-65"
-        />
+        
 
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-900/40 to-transparent" />
 
@@ -681,7 +694,7 @@ export default function TripDetailPage({ tripId, onBack }) {
 
                       <div className="space-y-4">
 
-                        {items.map((act) => (
+                        {items.map((act, idx) => (
 
                           <div
                             key={act.id}
@@ -689,7 +702,7 @@ export default function TripDetailPage({ tripId, onBack }) {
                           >
 
                             <img
-                              src={getPhotoForActivity(act)}
+                              src={getPhotoForActivity(act)} onError={(e) => { e.currentTarget.src = UNIQUE_CARD_PHOTOS[idx % UNIQUE_CARD_PHOTOS.length]; }}
                               alt={act.title}
                               className="w-full sm:w-28 h-24 object-cover rounded-lg"
                             />
