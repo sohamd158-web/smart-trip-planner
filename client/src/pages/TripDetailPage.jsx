@@ -26,19 +26,39 @@ const FALLBACK_PHOTOS = {
   Landmark: "https://images.unsplash.com/photo-1533929736458-ca588d08c8be?w=800"
 };
 
+const CATEGORIES = Object.keys(FALLBACK_PHOTOS);
+
+const money = (value) =>
+  Number(value || 0).toLocaleString("en-IN");
+
+const safeDate = (value) => {
+  if (!value) return "Date unavailable";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "Date unavailable"
+    : date.toLocaleDateString("en-IN");
+};
+
 export default function TripDetailPage({ tripId, onBack }) {
-
-  // ================= STATE =================
-
   const [trip, setTrip] = useState(null);
-  const [settlementData, setSettlementData] = useState(null);
-  const [discoverData, setDiscoverData] = useState(null);
+  const [settlementData, setSettlementData] = useState({
+    totalSpent: 0,
+    remainingBudget: 0,
+    settlements: [],
+    balances: {}
+  });
+  const [discoverData, setDiscoverData] = useState({
+    nearbyPlaces: [],
+    resources: []
+  });
 
   const [activeTab, setActiveTab] = useState("itinerary");
   const [distanceFilter, setDistanceFilter] = useState("all");
   const [selectedDayForAdd, setSelectedDayForAdd] = useState(1);
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
   const [preferences, setPreferences] = useState("");
   const [generatingAI, setGeneratingAI] = useState(false);
 
@@ -60,43 +80,110 @@ export default function TripDetailPage({ tripId, onBack }) {
     splitAmong: []
   });
 
-  // ================= LOAD TRIP DATA =================
+  // =====================================
+  // LOAD TRIP DATA
+  // =====================================
 
   const loadTripData = async () => {
     try {
-      const [tripRes, setRes, discRes] = await Promise.all([
-        api.get("/trips/" + tripId),
-        api.get("/trips/" + tripId + "/settlements"),
-        api.get("/trips/" + tripId + "/discover")
+      setLoadError("");
+
+      const results = await Promise.allSettled([
+        api.get(`/trips/${tripId}`),
+        api.get(`/trips/${tripId}/settlements`),
+        api.get(`/trips/${tripId}/discover`)
       ]);
 
-      setTrip(tripRes.data);
-      setSettlementData(setRes.data);
-      setDiscoverData(discRes.data);
+      // Trip data is essential.
+      const tripResult = results[0];
 
-      if (tripRes.data.members?.length > 0) {
-        setExpForm((prev) => ({
-          ...prev,
-          paidBy: prev.paidBy || tripRes.data.members[0],
-          splitAmong:
-            prev.splitAmong.length > 0
-              ? prev.splitAmong
-              : tripRes.data.members
-        }));
+      if (tripResult.status === "rejected") {
+        throw tripResult.reason;
       }
 
-    } catch (err) {
-      console.error("Failed to load trip:", err);
+      const tripData = tripResult.value?.data;
+
+      if (!tripData || typeof tripData !== "object") {
+        throw new Error("Invalid trip response from server");
+      }
+
+      setTrip(tripData);
+
+      // Settlement data is optional.
+      if (results[1].status === "fulfilled") {
+        const data = results[1].value?.data || {};
+
+        setSettlementData({
+          totalSpent: Number(data.totalSpent || 0),
+          remainingBudget: Number(data.remainingBudget || 0),
+          settlements: Array.isArray(data.settlements)
+            ? data.settlements
+            : [],
+          balances:
+            data.balances &&
+            typeof data.balances === "object" &&
+            !Array.isArray(data.balances)
+              ? data.balances
+              : {}
+        });
+      } else {
+        console.error("Settlement loading failed:", results[1].reason);
+      }
+
+      // Discover data is optional.
+      if (results[2].status === "fulfilled") {
+        const data = results[2].value?.data || {};
+
+        setDiscoverData({
+          ...data,
+          nearbyPlaces: Array.isArray(data.nearbyPlaces)
+            ? data.nearbyPlaces
+            : [],
+          resources: Array.isArray(data.resources)
+            ? data.resources
+            : []
+        });
+      } else {
+        console.error("Discover loading failed:", results[2].reason);
+      }
+
+      const members = Array.isArray(tripData.members)
+        ? tripData.members
+        : [];
+
+      setExpForm((prev) => ({
+        ...prev,
+        paidBy: members.includes(prev.paidBy)
+          ? prev.paidBy
+          : members[0] || "",
+        splitAmong: prev.splitAmong.filter((m) =>
+          members.includes(m)
+        ).length > 0
+          ? prev.splitAmong.filter((m) => members.includes(m))
+          : members
+      }));
+
+    } catch (error) {
+      console.error("Trip loading error:", error);
+      setLoadError(
+        error.response?.data?.error ||
+        error.message ||
+        "Unable to load trip."
+      );
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
+    setLoading(true);
+    setTrip(null);
     loadTripData();
   }, [tripId]);
 
-  // ================= AI ITINERARY =================
+  // =====================================
+  // GENERATE AI ITINERARY
+  // =====================================
 
   const handleGenerateAI = async (e) => {
     e.preventDefault();
@@ -104,20 +191,17 @@ export default function TripDetailPage({ tripId, onBack }) {
     setGeneratingAI(true);
 
     try {
-      await api.post(
-        "/trips/" + tripId + "/ai-itinerary",
-        {
-          preferences,
-          replaceExisting: true
-        }
-      );
+      await api.post(`/trips/${tripId}/ai-itinerary`, {
+        preferences,
+        replaceExisting: true
+      });
 
       setPreferences("");
       await loadTripData();
 
-    } catch (err) {
+    } catch (error) {
       alert(
-        err.response?.data?.error ||
+        error.response?.data?.error ||
         "Failed to generate itinerary"
       );
     } finally {
@@ -125,20 +209,19 @@ export default function TripDetailPage({ tripId, onBack }) {
     }
   };
 
-  // ================= ADD ACTIVITY =================
+  // =====================================
+  // ADD ACTIVITY
+  // =====================================
 
   const handleAddActivity = async (e) => {
     e.preventDefault();
 
     try {
-      await api.post(
-        "/trips/" + tripId + "/activities",
-        {
-          ...actForm,
-          dayNumber: Number(actForm.dayNumber),
-          estimatedCost: Number(actForm.estimatedCost || 0)
-        }
-      );
+      await api.post(`/trips/${tripId}/activities`, {
+        ...actForm,
+        dayNumber: Number(actForm.dayNumber),
+        estimatedCost: Number(actForm.estimatedCost || 0)
+      });
 
       setActForm({
         dayNumber: 1,
@@ -150,32 +233,32 @@ export default function TripDetailPage({ tripId, onBack }) {
 
       await loadTripData();
 
-    } catch (err) {
+    } catch (error) {
       alert(
-        err.response?.data?.error ||
+        error.response?.data?.error ||
         "Failed to add activity"
       );
     }
   };
 
-  // ================= DELETE ACTIVITY =================
+  // =====================================
+  // DELETE ACTIVITY
+  // =====================================
 
   const handleDeleteActivity = async (id) => {
     if (!window.confirm("Delete this activity?")) return;
 
     try {
-      await api.delete(
-        "/trips/" + tripId + "/activities/" + id
-      );
-
+      await api.delete(`/trips/${tripId}/activities/${id}`);
       await loadTripData();
-
-    } catch (err) {
+    } catch (error) {
       alert("Failed to delete activity");
     }
   };
 
-  // ================= AI EXPENSE =================
+  // =====================================
+  // AI EXPENSE
+  // =====================================
 
   const handleAIExpense = async (e) => {
     e.preventDefault();
@@ -185,42 +268,45 @@ export default function TripDetailPage({ tripId, onBack }) {
     setParsingExpense(true);
 
     try {
-      await api.post(
-        "/trips/" + tripId + "/ai-expense",
-        { text: aiExpenseText }
-      );
+      await api.post(`/trips/${tripId}/ai-expense`, {
+        text: aiExpenseText
+      });
 
       setAiExpenseText("");
       await loadTripData();
 
-    } catch (err) {
+    } catch (error) {
       alert(
-        err.response?.data?.error ||
-        "Failed to parse expense"
+        error.response?.data?.error ||
+        "Failed to process expense"
       );
     } finally {
       setParsingExpense(false);
     }
   };
 
-  // ================= MANUAL EXPENSE =================
+  // =====================================
+  // MANUAL EXPENSE
+  // =====================================
 
   const handleManualExpense = async (e) => {
     e.preventDefault();
 
     if (!expForm.splitAmong.length) {
-      alert("Select at least one member for the expense split.");
+      alert("Select at least one member.");
+      return;
+    }
+
+    if (!expForm.paidBy) {
+      alert("Select who paid.");
       return;
     }
 
     try {
-      await api.post(
-        "/trips/" + tripId + "/expenses",
-        {
-          ...expForm,
-          amount: parseFloat(expForm.amount)
-        }
-      );
+      await api.post(`/trips/${tripId}/expenses`, {
+        ...expForm,
+        amount: Number(expForm.amount)
+      });
 
       setExpForm((prev) => ({
         ...prev,
@@ -230,32 +316,32 @@ export default function TripDetailPage({ tripId, onBack }) {
 
       await loadTripData();
 
-    } catch (err) {
+    } catch (error) {
       alert(
-        err.response?.data?.error ||
+        error.response?.data?.error ||
         "Failed to add expense"
       );
     }
   };
 
-  // ================= DELETE EXPENSE =================
+  // =====================================
+  // DELETE EXPENSE
+  // =====================================
 
   const handleDeleteExpense = async (id) => {
     if (!window.confirm("Delete this expense?")) return;
 
     try {
-      await api.delete(
-        "/trips/" + tripId + "/expenses/" + id
-      );
-
+      await api.delete(`/trips/${tripId}/expenses/${id}`);
       await loadTripData();
-
-    } catch (err) {
+    } catch (error) {
       alert("Failed to delete expense");
     }
   };
 
-  // ================= SPLIT MEMBERS =================
+  // =====================================
+  // SPLIT MEMBERS
+  // =====================================
 
   const toggleSplitMember = (member) => {
     setExpForm((prev) => {
@@ -270,97 +356,140 @@ export default function TripDetailPage({ tripId, onBack }) {
     });
   };
 
-  // ================= LOADING =================
+  // =====================================
+  // LOADING AND ERROR
+  // =====================================
 
-  if (loading || !trip) {
+  if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 p-8 text-center text-slate-500">
-        Loading destination & 400 km explorer...
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <p className="text-slate-500">
+          Loading trip details...
+        </p>
       </div>
     );
   }
 
-  // ================= CALCULATIONS =================
+  if (!trip) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 gap-4 p-6">
+        <p className="text-red-600">
+          {loadError || "Trip could not be loaded."}
+        </p>
 
-  const activities = trip.activities || [];
-  const expenses = trip.expenses || [];
-  const members = trip.members || [];
+        <button
+          onClick={loadTripData}
+          className="bg-indigo-600 text-white px-5 py-2 rounded-lg"
+        >
+          Retry
+        </button>
+
+        <button
+          onClick={onBack}
+          className="text-indigo-600"
+        >
+          Back to Trips
+        </button>
+      </div>
+    );
+  }
+
+  // =====================================
+  // SAFE DATA
+  // =====================================
+
+  const activities = Array.isArray(trip.activities)
+    ? trip.activities
+    : [];
+
+  const expenses = Array.isArray(trip.expenses)
+    ? trip.expenses
+    : [];
+
+  const members = Array.isArray(trip.members)
+    ? trip.members
+    : [];
+
+  const settlements = Array.isArray(settlementData.settlements)
+    ? settlementData.settlements
+    : [];
+
+  const balances = settlementData.balances || {};
 
   const budget = Number(trip.budget || 0);
-  const totalSpent = Number(settlementData?.totalSpent || 0);
+  const totalSpent = Number(settlementData.totalSpent || 0);
+
+  const remainingBudget = Number.isFinite(
+    Number(settlementData.remainingBudget)
+  )
+    ? Number(settlementData.remainingBudget)
+    : Math.max(0, budget - totalSpent);
 
   const budgetPercent = Math.min(
     100,
     Math.round((totalSpent / Math.max(budget, 1)) * 100)
   );
 
-  const groupedDays = trip.activities.reduce((acc, act) => {
-    acc[act.dayNumber] = acc[act.dayNumber] || [];
-    acc[act.dayNumber].push(act);
+  const groupedDays = activities.reduce((acc, activity) => {
+    const day = activity.dayNumber || 1;
+
+    if (!acc[day]) acc[day] = [];
+
+    acc[day].push(activity);
+
     return acc;
   }, {});
 
-  const VERSATILE_PHOTOS = [
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com",
-    "https://unsplash.com"
-  ];
+  const nearbyPlaces = discoverData.nearbyPlaces || [];
 
-  const allDistinctPhotos = [...destGallery, ...VERSATILE_PHOTOS];
-  const allActivityIds = trip.activities.map((a) => a.id);
+  const filteredPlaces = nearbyPlaces.filter((place) => {
+    const distance = Number(place.distanceKm);
 
-  const getPhotoForActivity = (act) => {
-    const pos = allActivityIds.indexOf(act.id);
-    const index = pos >= 0 ? pos : Number(act.dayNumber) || 0;
-    return allDistinctPhotos[index % allDistinctPhotos.length];
-  };
-
-  const filteredPlaces = (
-    discoverData?.nearbyPlaces || []
-  ).filter((p) => {
-
-    if (distanceFilter === "near") {
-      return p.distanceKm <= 100;
+    if (!Number.isFinite(distance) || distance > 400) {
+      return false;
     }
 
-    if (distanceFilter === "mid") {
-      return p.distanceKm > 100 && p.distanceKm <= 250;
-    }
+    if (distanceFilter === "near") return distance < 100;
+    if (distanceFilter === "mid") return distance >= 100 && distance <= 250;
+    if (distanceFilter === "far") return distance > 250 && distance <= 400;
 
-    if (distanceFilter === "far") {
-      return p.distanceKm > 250 && p.distanceKm <= 400;
-    }
-
-    return p.distanceKm <= 400;
+    return true;
   });
 
-  const dayOptions = Array.from({ length: 7 }, (_, i) => i + 1);
+  const dayOptions = Array.from(
+    { length: 7 },
+    (_, index) => index + 1
+  );
 
-  // ================= MAIN UI =================
+  const getPhoto = (activity) => {
+    const match = nearbyPlaces.find(
+      (place) =>
+        place.title?.toLowerCase() === activity.title?.toLowerCase()
+    );
+
+    return (
+      match?.imageUrl ||
+      FALLBACK_PHOTOS[activity.category] ||
+      FALLBACK_PHOTOS.Sightseeing
+    );
+  };
+
+  // =====================================
+  // MAIN UI
+  // =====================================
 
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
 
-      {/* ================= HEADER ================= */}
+      {/* HEADER */}
 
-      <div className="relative h-48 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 overflow-hidden">
+      <div className="relative h-56 bg-slate-900 overflow-hidden">
 
-        
+        <img
+          src={discoverData.heroImage || FALLBACK_PHOTOS.Nature}
+          alt={trip.destination || "Trip"}
+          className="w-full h-full object-cover opacity-65"
+        />
 
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-900/40 to-transparent" />
 
@@ -368,240 +497,189 @@ export default function TripDetailPage({ tripId, onBack }) {
 
           <button
             onClick={onBack}
-            className="self-start inline-flex items-center gap-1.5 text-xs bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-1.5 rounded-full"
+            className="self-start inline-flex items-center gap-2 text-xs bg-white/15 hover:bg-white/25 px-3 py-2 rounded-full"
           >
-            <ArrowLeft className="w-3.5 h-3.5" />
+            <ArrowLeft className="w-4 h-4" />
             Back to Trips
           </button>
 
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
 
             <div>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-indigo-300 mb-1">
 
-              <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-indigo-300 mb-1">
+                <MapPin className="w-4 h-4" />
 
-                <span className="inline-flex items-center gap-1">
-                  <MapPin className="w-3.5 h-3.5" />
-                  {trip.destination}, {discoverData?.country || "India"}
-                </span>
+                {trip.destination}, {discoverData.country || "India"}
 
-                {discoverData?.weather && (
-                  <span className="inline-flex items-center gap-1 bg-white/15 px-2.5 py-0.5 rounded-full text-white">
-                    <CloudSun className="w-3.5 h-3.5" />
+                {discoverData.weather && (
+                  <span className="inline-flex items-center gap-1 bg-white/15 px-2 py-1 rounded-full text-white">
+                    <CloudSun className="w-4 h-4" />
                     {discoverData.weather}
                   </span>
                 )}
-
               </div>
 
               <h1 className="text-2xl sm:text-3xl font-bold">
                 {trip.title}
               </h1>
 
-              <div className="flex flex-wrap items-center gap-4 text-xs text-slate-300 mt-1">
+              <div className="flex flex-wrap items-center gap-4 text-xs text-slate-300 mt-2">
 
-                <span className="inline-flex items-center gap-1">
-                  <Calendar className="w-3.5 h-3.5" />
-                  {new Date(trip.startDate).toLocaleDateString()}
-                  {" – "}
-                  {new Date(trip.endDate).toLocaleDateString()}
+                <span className="flex items-center gap-1">
+                  <Calendar className="w-4 h-4" />
+                  {safeDate(trip.startDate)} – {safeDate(trip.endDate)}
                 </span>
 
-                <span className="inline-flex items-center gap-1">
-                  <Users className="w-3.5 h-3.5" />
+                <span className="flex items-center gap-1">
+                  <Users className="w-4 h-4" />
                   {members.join(", ")}
                 </span>
 
               </div>
-
             </div>
 
-            {/* Budget Card */}
+            {/* BUDGET */}
 
             <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-xl p-3 min-w-[230px]">
 
-              <div className="flex justify-between text-xs mb-1">
-                <span>
-                  Spent: ₹{totalSpent.toLocaleString("en-IN")}
-                </span>
-
-                <span>
-                  Budget: ₹{budget.toLocaleString("en-IN")}
-                </span>
+              <div className="flex justify-between text-xs mb-2">
+                <span>Spent: ₹{money(totalSpent)}</span>
+                <span>Budget: ₹{money(budget)}</span>
               </div>
 
               <div className="w-full bg-white/20 h-2 rounded-full overflow-hidden">
-
                 <div
-                  className={
-                    "h-full " +
-                    (budgetPercent > 90
-                      ? "bg-red-400"
-                      : "bg-emerald-400")
-                  }
-                  style={{ width: budgetPercent + "%" }}
+                  className={budgetPercent > 90 ? "bg-red-400 h-full" : "bg-emerald-400 h-full"}
+                  style={{ width: `${budgetPercent}%` }}
                 />
-
               </div>
 
-              <p className="text-right text-xs text-emerald-300 mt-1">
-                Remaining: ₹
-                {Number(
-                  settlementData?.remainingBudget ??
-                  Math.max(0, budget - totalSpent)
-                ).toLocaleString("en-IN")}
+              <p className="text-right text-xs text-emerald-300 mt-2">
+                Remaining: ₹{money(remainingBudget)}
               </p>
 
             </div>
-
           </div>
-
         </div>
-
       </div>
 
-      {/* ================= NAVIGATION TABS ================= */}
+      {/* NAVIGATION */}
 
-      <div className="bg-white border-b border-slate-200 px-6 py-3 sticky top-0 z-10 shadow-sm">
+      <div className="bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-10 shadow-sm">
 
         <div className="max-w-5xl mx-auto flex flex-wrap gap-2">
 
           <button
             onClick={() => setActiveTab("itinerary")}
-            className={
-              "px-4 py-2 rounded-lg text-sm font-semibold transition " +
-              (activeTab === "itinerary"
+            className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+              activeTab === "itinerary"
                 ? "bg-indigo-600 text-white"
-                : "text-slate-600 hover:bg-slate-100")
-            }
+                : "text-slate-600 hover:bg-slate-100"
+            }`}
           >
             AI Itinerary ({activities.length})
           </button>
 
           <button
             onClick={() => setActiveTab("discover")}
-            className={
-              "px-4 py-2 rounded-lg text-sm font-semibold transition inline-flex items-center gap-1.5 " +
-              (activeTab === "discover"
+            className={`px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center gap-2 ${
+              activeTab === "discover"
                 ? "bg-indigo-600 text-white"
-                : "text-slate-600 hover:bg-slate-100")
-            }
+                : "text-slate-600 hover:bg-slate-100"
+            }`}
           >
             <Compass className="w-4 h-4" />
-            400 km Explorer & Resources ({discoverData?.totalPlacesFound || 0})
+            400 km Explorer ({nearbyPlaces.length})
           </button>
 
           <button
             onClick={() => setActiveTab("expenses")}
-            className={
-              "px-4 py-2 rounded-lg text-sm font-semibold transition " +
-              (activeTab === "expenses"
+            className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+              activeTab === "expenses"
                 ? "bg-indigo-600 text-white"
-                : "text-slate-600 hover:bg-slate-100")
-            }
+                : "text-slate-600 hover:bg-slate-100"
+            }`}
           >
             Expense Splitter ({expenses.length})
           </button>
 
         </div>
-
       </div>
 
-      {/* ================= MAIN CONTENT ================= */}
+      <main className="max-w-5xl mx-auto p-4 sm:p-6">
 
-      <main className="max-w-5xl mx-auto p-6">
-
-        {/* ================================================= */}
-        {/*                  ITINERARY TAB                    */}
-        {/* ================================================= */}
+        {/* ================================= */}
+        {/* ITINERARY */}
+        {/* ================================= */}
 
         {activeTab === "itinerary" && (
 
           <div className="space-y-6">
 
-            {/* AI GENERATOR */}
+            {/* AI PLAN */}
 
-            <div className="bg-gradient-to-r from-indigo-600 to-violet-600 rounded-2xl p-6 text-white shadow-md">
+            <section className="bg-gradient-to-r from-indigo-600 to-violet-600 rounded-2xl p-6 text-white">
 
               <div className="flex items-center gap-2 mb-2">
                 <Sparkles className="w-5 h-5" />
-
                 <h2 className="text-lg font-bold">
                   Auto-Generate 400 km Radius Plan
                 </h2>
               </div>
 
               <p className="text-sm text-indigo-100 mb-4">
-                Automatically picks diverse real attractions,
-                hill stations, and landmarks within 400 km of{" "}
-                {trip.destination}.
+                Discover attractions, hill stations, heritage forts,
+                waterfalls and landmarks within 400 km of {trip.destination}.
               </p>
 
-              <form
-                onSubmit={handleGenerateAI}
-                className="flex flex-col sm:flex-row gap-3"
-              >
+              <form onSubmit={handleGenerateAI} className="flex flex-col sm:flex-row gap-3">
 
                 <input
                   type="text"
-                  placeholder="Preferences: waterfalls, heritage forts, local food, wildlife..."
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-white/15 border border-white/25 text-white placeholder-indigo-200 focus:outline-none"
+                  placeholder="Preferences: waterfalls, forts, food, wildlife..."
                   value={preferences}
                   onChange={(e) => setPreferences(e.target.value)}
+                  className="flex-1 px-4 py-3 rounded-xl bg-white/15 border border-white/25 text-white placeholder-indigo-200 outline-none"
                 />
 
                 <button
                   type="submit"
                   disabled={generatingAI}
-                  className="px-5 py-2.5 bg-white text-indigo-700 rounded-xl font-semibold hover:bg-indigo-50 disabled:opacity-50"
+                  className="bg-white text-indigo-700 px-5 py-3 rounded-xl font-semibold disabled:opacity-50"
                 >
                   {generatingAI ? "Discovering..." : "Generate Plan"}
                 </button>
 
               </form>
+            </section>
 
-            </div>
+            {/* CUSTOM ACTIVITY */}
 
-            {/* ADD CUSTOM ACTIVITY */}
+            <section className="bg-white rounded-xl p-5 border border-slate-200">
 
-            <div className="bg-white rounded-xl p-5 border border-slate-200">
-
-              <h2 className="text-lg font-bold mb-4">
+              <h2 className="font-bold text-lg mb-4">
                 Add Custom Activity
               </h2>
 
-              <form
-                onSubmit={handleAddActivity}
-                className="grid grid-cols-1 sm:grid-cols-2 gap-3"
-              >
+              <form onSubmit={handleAddActivity} className="grid sm:grid-cols-2 gap-3">
 
                 <input
                   type="number"
                   min="1"
-                  max={dayOptions.length}
                   placeholder="Day #"
                   required
-                  className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
                   value={actForm.dayNumber}
-                  onChange={(e) =>
-                    setActForm({
-                      ...actForm,
-                      dayNumber: e.target.value
-                    })
-                  }
+                  onChange={(e) => setActForm({ ...actForm, dayNumber: e.target.value })}
+                  className="px-3 py-2 border rounded-lg"
                 />
 
                 <select
                   value={actForm.category}
-                  onChange={(e) =>
-                    setActForm({
-                      ...actForm,
-                      category: e.target.value
-                    })
-                  }
-                  className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
+                  onChange={(e) => setActForm({ ...actForm, category: e.target.value })}
+                  className="px-3 py-2 border rounded-lg bg-white"
                 >
-                  {Object.keys(FALLBACK_PHOTOS).map((category) => (
+                  {CATEGORIES.map((category) => (
                     <option key={category} value={category}>
                       {category}
                     </option>
@@ -610,214 +688,177 @@ export default function TripDetailPage({ tripId, onBack }) {
 
                 <input
                   type="text"
-                  placeholder="Custom activity title"
+                  placeholder="Activity title"
                   required
-                  className="sm:col-span-2 px-3 py-2 border border-slate-200 rounded-lg text-sm"
                   value={actForm.title}
-                  onChange={(e) =>
-                    setActForm({
-                      ...actForm,
-                      title: e.target.value
-                    })
-                  }
+                  onChange={(e) => setActForm({ ...actForm, title: e.target.value })}
+                  className="sm:col-span-2 px-3 py-2 border rounded-lg"
                 />
 
                 <input
                   type="number"
                   min="0"
                   placeholder="Estimated Cost (₹)"
-                  className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
                   value={actForm.estimatedCost}
-                  onChange={(e) =>
-                    setActForm({
-                      ...actForm,
-                      estimatedCost: e.target.value
-                    })
-                  }
+                  onChange={(e) => setActForm({ ...actForm, estimatedCost: e.target.value })}
+                  className="px-3 py-2 border rounded-lg"
                 />
 
                 <input
                   type="text"
-                  placeholder="Activity notes"
-                  className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                  placeholder="Notes"
                   value={actForm.notes}
-                  onChange={(e) =>
-                    setActForm({
-                      ...actForm,
-                      notes: e.target.value
-                    })
-                  }
+                  onChange={(e) => setActForm({ ...actForm, notes: e.target.value })}
+                  className="px-3 py-2 border rounded-lg"
                 />
 
                 <button
                   type="submit"
-                  className="sm:col-span-2 flex items-center justify-center gap-2 bg-indigo-600 text-white rounded-lg px-4 py-2 hover:bg-indigo-700"
+                  className="sm:col-span-2 flex justify-center items-center gap-2 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700"
                 >
                   <Plus className="w-4 h-4" />
                   Add Stop
                 </button>
 
               </form>
+            </section>
 
-            </div>
+            {/* ITINERARY DAYS */}
 
-            {/* ITINERARY DISPLAY */}
+            {Object.keys(groupedDays).length === 0 ? (
 
-            <div className="space-y-5">
+              <div className="bg-white rounded-xl p-8 text-center border">
+                <MapPin className="mx-auto text-slate-300 w-10 h-10 mb-3" />
+                <p className="text-slate-500">
+                  No activities yet. Generate an AI plan or add your first stop.
+                </p>
+              </div>
 
-              {Object.keys(groupedDays).length === 0 ? (
+            ) : (
 
-                <div className="bg-white border border-slate-200 rounded-xl p-8 text-center">
+              Object.entries(groupedDays)
+                .sort(([a], [b]) => Number(a) - Number(b))
+                .map(([day, items]) => (
 
-                  <MapPin className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                  <section key={day} className="bg-white rounded-xl border p-5">
 
-                  <p className="text-slate-500">
-                    Click Generate Plan above to populate unique places within 400 km!
-                  </p>
+                    <h3 className="font-bold text-lg mb-4">
+                      Day {day}
+                    </h3>
 
-                </div>
+                    <div className="space-y-4">
 
-              ) : (
+                      {items.map((act) => (
 
-                Object.entries(groupedDays)
-                  .sort(([a], [b]) => Number(a) - Number(b))
-                  .map(([day, items]) => (
+                        <div key={act.id} className="flex flex-col sm:flex-row gap-4 border-b last:border-0 pb-4 last:pb-0">
 
-                    <div
-                      key={day}
-                      className="bg-white border border-slate-200 rounded-xl p-5"
-                    >
+                          <img
+                            src={getPhoto(act)}
+                            alt={act.title || "Activity"}
+                            onError={(e) => {
+                              e.currentTarget.onerror = null;
+                              e.currentTarget.src = FALLBACK_PHOTOS.Sightseeing;
+                            }}
+                            className="w-full sm:w-28 h-24 object-cover rounded-lg"
+                          />
 
-                      <h3 className="font-bold text-lg mb-4">
-                        Day {day}
-                      </h3>
+                          <div className="flex-1 min-w-0">
 
-                      <div className="space-y-4">
+                            <h4 className="font-semibold">
+                              {act.title}
+                            </h4>
 
-                        {items.map((act, idx) => (
+                            <p className="text-xs text-indigo-600">
+                              {act.category}
+                            </p>
 
-                          <div
-                            key={act.id}
-                            className="flex flex-col sm:flex-row gap-4 border-b border-slate-100 pb-4 last:border-0 last:pb-0"
-                          >
-
-                            <img
-                              src={getPhotoForActivity(act)} onError={(e) => { e.currentTarget.src = UNIQUE_CARD_PHOTOS[idx % UNIQUE_CARD_PHOTOS.length]; }}
-                              alt={act.title}
-                              className="w-full sm:w-28 h-24 object-cover rounded-lg"
-                            />
-
-                            <div className="flex-1 min-w-0">
-
-                              <h4 className="font-semibold text-slate-800">
-                                {act.title}
-                              </h4>
-
-                              <p className="text-xs text-indigo-600 mt-1">
-                                {act.category}
+                            {act.notes && (
+                              <p className="text-sm text-slate-500 mt-1">
+                                {act.notes}
                               </p>
+                            )}
 
-                              {act.notes && (
-                                <p className="text-sm text-slate-500 mt-2">
-                                  {act.notes}
-                                </p>
-                              )}
-
-                              <p className="font-semibold text-sm mt-2">
-                                ₹{Number(act.estimatedCost || 0).toLocaleString("en-IN")}
-                              </p>
-
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteActivity(act.id)}
-                              className="self-start text-slate-400 hover:text-red-500 p-2"
-                              title="Delete activity"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <p className="font-semibold text-sm mt-2">
+                              ₹{money(act.estimatedCost)}
+                            </p>
 
                           </div>
 
-                        ))}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteActivity(act.id)}
+                            className="self-start text-red-500 p-2"
+                            title="Delete activity"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
 
-                      </div>
+                        </div>
+
+                      ))}
 
                     </div>
+                  </section>
 
-                  ))
+                ))
 
-              )}
-
-            </div>
+            )}
 
           </div>
-
         )}
 
-        {/* ================================================= */}
-        {/*                   DISCOVER TAB                    */}
-        {/* ================================================= */}
+        {/* ================================= */}
+        {/* DISCOVER */}
+        {/* ================================= */}
 
         {activeTab === "discover" && (
 
           <div className="space-y-6">
 
-            {/* TRAVEL RESOURCES */}
+            {/* RESOURCES */}
 
-            <section className="bg-white rounded-xl p-5 border border-slate-200">
+            <section className="bg-white rounded-xl border p-5">
 
               <h2 className="text-xl font-bold mb-4">
-                Essential Travel Resources ({discoverData?.country || "India"})
+                Essential Travel Resources ({discoverData.country || "India"})
               </h2>
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid sm:grid-cols-2 gap-3">
 
-                {discoverData?.resources?.map((r, idx) => (
+                {discoverData.resources.map((resource, index) => (
 
-                  <div
-                    key={idx}
-                    className="bg-slate-50 p-4 rounded-lg"
-                  >
-
-                    <h3 className="font-semibold">
-                      {r.title}
-                    </h3>
-
+                  <div key={resource.title || index} className="bg-slate-50 rounded-lg p-4">
+                    <h3 className="font-semibold">{resource.title}</h3>
                     <p className="text-sm text-slate-500 mt-1">
-                      {r.detail}
+                      {resource.detail}
                     </p>
-
                   </div>
 
                 ))}
 
-                {(!discoverData?.resources ||
-                  discoverData.resources.length === 0) && (
-                  <p className="text-sm text-slate-500">
+                {discoverData.resources.length === 0 && (
+                  <p className="text-slate-500 text-sm">
                     No travel resources available.
                   </p>
                 )}
 
               </div>
-
             </section>
 
-            {/* DESTINATIONS */}
+            {/* PLACES */}
 
-            <section className="bg-white rounded-xl p-5 border border-slate-200">
+            <section className="bg-white rounded-xl border p-5">
 
               <h2 className="text-xl font-bold">
                 Destinations Within 400 km of{" "}
-                {discoverData?.destination || trip.destination}
+                {discoverData.destination || trip.destination}
               </h2>
 
               <p className="text-sm text-slate-500 mt-1 mb-4">
-                Filter by road distance and add stops directly to your itinerary.
+                Filter destinations and add them directly to your itinerary.
               </p>
 
-              {/* DISTANCE FILTER */}
+              {/* FILTER */}
 
               <div className="flex flex-wrap gap-2 mb-5">
 
@@ -826,18 +867,17 @@ export default function TripDetailPage({ tripId, onBack }) {
                   ["near", "< 100 km"],
                   ["mid", "100–250 km"],
                   ["far", "250–400 km"]
-                ].map(([val, label]) => (
+                ].map(([value, label]) => (
 
                   <button
-                    key={val}
                     type="button"
-                    onClick={() => setDistanceFilter(val)}
-                    className={
-                      "px-3 py-1.5 rounded-full font-medium border transition " +
-                      (distanceFilter === val
+                    key={value}
+                    onClick={() => setDistanceFilter(value)}
+                    className={`px-3 py-2 rounded-full text-sm border ${
+                      distanceFilter === value
                         ? "bg-indigo-600 text-white border-indigo-600"
-                        : "bg-white text-slate-600 border-slate-200")
-                    }
+                        : "bg-white text-slate-600 border-slate-200"
+                    }`}
                   >
                     {label}
                   </button>
@@ -856,39 +896,36 @@ export default function TripDetailPage({ tripId, onBack }) {
 
                 <select
                   value={selectedDayForAdd}
-                  onChange={(e) =>
-                    setSelectedDayForAdd(Number(e.target.value))
-                  }
-                  className="px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white font-semibold"
+                  onChange={(e) => setSelectedDayForAdd(Number(e.target.value))}
+                  className="border rounded-lg px-3 py-2 bg-white"
                 >
-
-                  {dayOptions.map((d) => (
-
-                    <option key={d} value={d}>
-                      Day {d}
+                  {dayOptions.map((day) => (
+                    <option key={day} value={day}>
+                      Day {day}
                     </option>
-
                   ))}
-
                 </select>
 
               </div>
 
               {/* DESTINATION CARDS */}
 
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid sm:grid-cols-2 gap-4">
 
-                {filteredPlaces.map((p, idx) => (
+                {filteredPlaces.map((place, index) => (
 
                   <div
-                    key={p.id || `${p.title}-${idx}`}
-                    className="border border-slate-200 rounded-xl overflow-hidden hover:shadow-md transition"
+                    key={place.id || place.title || index}
+                    className="border rounded-xl overflow-hidden"
                   >
 
-                    {p.imageUrl && (
+                    {place.imageUrl && (
                       <img
-                        src={p.imageUrl}
-                        alt={p.title}
+                        src={place.imageUrl}
+                        alt={place.title}
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                        }}
                         className="w-full h-40 object-cover"
                       />
                     )}
@@ -897,83 +934,65 @@ export default function TripDetailPage({ tripId, onBack }) {
 
                       <div className="flex justify-between gap-2 mb-2">
 
-                        <span className="text-xs font-semibold text-indigo-600">
-                          {p.distanceLabel || `${p.distanceKm} km`}
+                        <span className="text-xs text-indigo-600 font-semibold">
+                          {place.distanceLabel || `${place.distanceKm} km`}
                         </span>
 
                         <span className="text-xs text-slate-500">
-                          {p.category}
+                          {place.category || "Sightseeing"}
                         </span>
 
                       </div>
 
                       <h3 className="font-bold text-lg">
-                        {p.title}
+                        {place.title}
                       </h3>
 
                       <p className="text-sm text-slate-500 mt-2">
-                        {p.notes}
+                        {place.notes}
                       </p>
 
-                      {p.food && (
+                      {place.food && (
                         <p className="text-sm text-emerald-600 mt-2">
-                          Must try: {p.food}
+                          Must try: {place.food}
                         </p>
                       )}
 
                       <div className="flex justify-between items-center mt-4">
 
                         <span className="font-semibold">
-                          ₹{Number(p.cost || 0).toLocaleString("en-IN")}
+                          ₹{money(place.cost)}
                         </span>
 
                         <button
                           type="button"
                           onClick={async () => {
-
                             try {
-
-                              await api.post(
-                                "/trips/" + tripId + "/activities",
-                                {
-                                  dayNumber: selectedDayForAdd,
-                                  title: p.title,
-                                  category: p.category || "Sightseeing",
-                                  estimatedCost: Number(p.cost || 0),
-                                  notes:
-                                    (p.distanceLabel || `${p.distanceKm} km`) +
-                                    " • " +
-                                    (p.notes || "")
-                                }
-                              );
+                              await api.post(`/trips/${tripId}/activities`, {
+                                dayNumber: selectedDayForAdd,
+                                title: place.title,
+                                category: place.category || "Sightseeing",
+                                estimatedCost: Number(place.cost || 0),
+                                notes: `${place.distanceLabel || `${place.distanceKm} km`} • ${place.notes || ""}`
+                              });
 
                               await loadTripData();
+                              alert(`Added ${place.title} to Day ${selectedDayForAdd}!`);
 
+                            } catch (error) {
                               alert(
-                                `Added ${p.title} to Day ${selectedDayForAdd}!`
-                              );
-
-                            } catch (err) {
-
-                              console.error(err);
-
-                              alert(
-                                err.response?.data?.error ||
+                                error.response?.data?.error ||
                                 "Unable to add destination"
                               );
-
                             }
-
                           }}
-                          className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg transition"
+                          className="bg-indigo-600 text-white text-xs px-3 py-2 rounded-lg hover:bg-indigo-700"
                         >
                           + Add to Day {selectedDayForAdd}
                         </button>
 
                       </div>
-
                     </div>
-
                   </div>
 
                 ))}
@@ -981,56 +1000,46 @@ export default function TripDetailPage({ tripId, onBack }) {
               </div>
 
               {filteredPlaces.length === 0 && (
-
                 <p className="text-center text-slate-500 py-8">
-                  No destinations found for this distance filter.
+                  No destinations found within this distance range.
                 </p>
-
               )}
 
             </section>
 
           </div>
-
         )}
 
-        {/* ================================================= */}
-        {/*                    EXPENSE TAB                    */}
-        {/* ================================================= */}
+        {/* ================================= */}
+        {/* EXPENSES */}
+        {/* ================================= */}
 
         {activeTab === "expenses" && (
 
           <div className="space-y-6">
 
-            {/* AI EXPENSE ENTRY */}
+            {/* AI EXPENSE */}
 
-            <section className="bg-white rounded-xl p-5 border border-slate-200">
+            <section className="bg-white rounded-xl border p-5">
 
-              <div className="flex items-center gap-2 mb-3">
-                <Sparkles className="w-5 h-5 text-indigo-600" />
+              <h2 className="text-lg font-bold mb-3">
+                Quick AI Expense Entry
+              </h2>
 
-                <h2 className="text-lg font-bold">
-                  Quick AI Expense Entry
-                </h2>
-              </div>
-
-              <form
-                onSubmit={handleAIExpense}
-                className="flex flex-col sm:flex-row gap-3"
-              >
+              <form onSubmit={handleAIExpense} className="flex flex-col sm:flex-row gap-3">
 
                 <input
                   type="text"
                   placeholder="e.g., Rahul paid 1200 for lunch split between Soham and Rahul"
-                  className="flex-1 px-3.5 py-2 border border-slate-200 rounded-xl text-sm"
                   value={aiExpenseText}
                   onChange={(e) => setAiExpenseText(e.target.value)}
+                  className="flex-1 border rounded-lg px-3 py-2"
                 />
 
                 <button
                   type="submit"
                   disabled={parsingExpense}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg disabled:opacity-50"
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg disabled:opacity-50"
                 >
                   {parsingExpense ? "Parsing..." : "Add with AI"}
                 </button>
@@ -1041,29 +1050,21 @@ export default function TripDetailPage({ tripId, onBack }) {
 
             {/* MANUAL EXPENSE */}
 
-            <section className="bg-white rounded-xl p-5 border border-slate-200">
+            <section className="bg-white rounded-xl border p-5">
 
               <h2 className="text-lg font-bold mb-4">
                 Manual Expense Entry
               </h2>
 
-              <form
-                onSubmit={handleManualExpense}
-                className="space-y-3"
-              >
+              <form onSubmit={handleManualExpense} className="space-y-3">
 
                 <input
                   type="text"
                   placeholder="Description"
                   required
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg"
                   value={expForm.description}
-                  onChange={(e) =>
-                    setExpForm({
-                      ...expForm,
-                      description: e.target.value
-                    })
-                  }
+                  onChange={(e) => setExpForm({ ...expForm, description: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2"
                 />
 
                 <input
@@ -1072,43 +1073,25 @@ export default function TripDetailPage({ tripId, onBack }) {
                   step="0.01"
                   placeholder="Amount (₹)"
                   required
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg"
                   value={expForm.amount}
-                  onChange={(e) =>
-                    setExpForm({
-                      ...expForm,
-                      amount: e.target.value
-                    })
-                  }
+                  onChange={(e) => setExpForm({ ...expForm, amount: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2"
                 />
 
                 <select
                   required
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white"
                   value={expForm.paidBy}
-                  onChange={(e) =>
-                    setExpForm({
-                      ...expForm,
-                      paidBy: e.target.value
-                    })
-                  }
+                  onChange={(e) => setExpForm({ ...expForm, paidBy: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2 bg-white"
                 >
+                  <option value="">Paid by</option>
 
-                  <option value="">
-                    Paid by
-                  </option>
-
-                  {members.map((m) => (
-
-                    <option key={m} value={m}>
-                      {m}
+                  {members.map((member) => (
+                    <option key={member} value={member}>
+                      {member}
                     </option>
-
                   ))}
-
                 </select>
-
-                {/* SPLIT MEMBERS */}
 
                 <div>
 
@@ -1118,20 +1101,19 @@ export default function TripDetailPage({ tripId, onBack }) {
 
                   <div className="flex flex-wrap gap-2">
 
-                    {members.map((m) => (
+                    {members.map((member) => (
 
                       <button
                         type="button"
-                        key={m}
-                        onClick={() => toggleSplitMember(m)}
-                        className={
-                          "text-xs px-2.5 py-1 rounded-full border " +
-                          (expForm.splitAmong.includes(m)
-                            ? "bg-indigo-50 border-indigo-400 text-indigo-700 font-medium"
-                            : "border-slate-200 text-slate-400")
-                        }
+                        key={member}
+                        onClick={() => toggleSplitMember(member)}
+                        className={`text-xs px-3 py-2 rounded-full border ${
+                          expForm.splitAmong.includes(member)
+                            ? "bg-indigo-50 border-indigo-400 text-indigo-700"
+                            : "border-slate-200 text-slate-500"
+                        }`}
                       >
-                        {m}
+                        {member}
                       </button>
 
                     ))}
@@ -1142,18 +1124,17 @@ export default function TripDetailPage({ tripId, onBack }) {
 
                 <button
                   type="submit"
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg"
+                  className="bg-indigo-600 text-white px-5 py-2 rounded-lg hover:bg-indigo-700"
                 >
                   Log Expense
                 </button>
 
               </form>
-
             </section>
 
             {/* EXPENSE HISTORY */}
 
-            <section className="bg-white rounded-xl p-5 border border-slate-200">
+            <section className="bg-white rounded-xl border p-5">
 
               <h2 className="text-lg font-bold mb-4">
                 Expense History
@@ -1169,23 +1150,20 @@ export default function TripDetailPage({ tripId, onBack }) {
 
                 <div className="space-y-3">
 
-                  {expenses.map((exp) => (
+                  {expenses.map((expense) => (
 
-                    <div
-                      key={exp.id}
-                      className="flex justify-between items-center gap-3 border-b border-slate-100 pb-3"
-                    >
+                    <div key={expense.id} className="flex justify-between items-center gap-3 border-b pb-3">
 
                       <div className="min-w-0">
 
                         <p className="font-semibold">
-                          {exp.description}
+                          {expense.description}
                         </p>
 
                         <p className="text-xs text-slate-500">
-                          Paid by <strong>{exp.paidBy}</strong>
+                          Paid by <strong>{expense.paidBy}</strong>
                           {" • "}
-                          Split with {(exp.splitAmong || []).join(", ")}
+                          Split with {(Array.isArray(expense.splitAmong) ? expense.splitAmong : []).join(", ")}
                         </p>
 
                       </div>
@@ -1193,13 +1171,13 @@ export default function TripDetailPage({ tripId, onBack }) {
                       <div className="flex items-center gap-3 shrink-0">
 
                         <span className="font-semibold">
-                          ₹{Number(exp.amount).toLocaleString("en-IN")}
+                          ₹{money(expense.amount)}
                         </span>
 
                         <button
                           type="button"
-                          onClick={() => handleDeleteExpense(exp.id)}
-                          className="text-slate-400 hover:text-red-500"
+                          onClick={() => handleDeleteExpense(expense.id)}
+                          className="text-red-500"
                           title="Delete expense"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -1219,47 +1197,37 @@ export default function TripDetailPage({ tripId, onBack }) {
 
             {/* WHO OWES WHOM */}
 
-            <section className="bg-white rounded-xl p-5 border border-slate-200">
+            <section className="bg-white rounded-xl border p-5">
 
               <div className="flex items-center gap-2 mb-4">
-
                 <ArrowRightLeft className="w-5 h-5 text-indigo-600" />
 
                 <h2 className="text-lg font-bold">
                   Who Owes Whom
                 </h2>
-
               </div>
 
-              {!settlementData ||
-              settlementData.settlements?.length === 0 ? (
+              {settlements.length === 0 ? (
 
-                <div className="flex items-center gap-2 text-emerald-600 font-medium">
-
+                <p className="flex items-center gap-2 text-emerald-600 font-medium">
                   <CheckCircle2 className="w-5 h-5" />
-
                   All settled up!
-
-                </div>
+                </p>
 
               ) : (
 
                 <div className="space-y-3">
 
-                  {settlementData.settlements.map((s, idx) => (
+                  {settlements.map((item, index) => (
 
-                    <div
-                      key={s.id || idx}
-                      className="flex justify-between items-center border-b border-slate-100 pb-3"
-                    >
+                    <div key={item.id || index} className="flex justify-between items-center">
 
                       <span className="text-sm">
-                        <strong>{s.from}</strong> owes{" "}
-                        <strong>{s.to}</strong>
+                        {item.from} owes {item.to}
                       </span>
 
-                      <span className="font-bold text-slate-800">
-                        ₹{Number(s.amount).toLocaleString("en-IN")}
+                      <span className="font-bold">
+                        ₹{money(item.amount)}
                       </span>
 
                     </div>
@@ -1274,16 +1242,25 @@ export default function TripDetailPage({ tripId, onBack }) {
 
             {/* NET BALANCES */}
 
-            <section className="bg-white rounded-xl p-5 border border-slate-200">
+            <section className="bg-white rounded-xl border p-5">
 
               <h2 className="text-lg font-bold mb-4">
                 Net Balances
               </h2>
 
-              {settlementData &&
-                Object.entries(settlementData.balances || {}).map(
-                  ([person, bal]) => (
+              {Object.keys(balances).length === 0 ? (
 
+                <p className="text-sm text-slate-500">
+                  No balance information available.
+                </p>
+
+              ) : (
+
+                Object.entries(balances).map(([person, balance]) => {
+
+                  const amount = Number(balance || 0);
+
+                  return (
                     <div
                       key={person}
                       className="flex justify-between py-2 border-b border-slate-100"
@@ -1291,31 +1268,26 @@ export default function TripDetailPage({ tripId, onBack }) {
 
                       <span>{person}</span>
 
-                      <span
-                        className={
-                          "font-semibold " +
-                          (bal >= 0
-                            ? "text-emerald-600"
-                            : "text-red-500")
-                        }
-                      >
-                        {bal >= 0 ? "+" : "-"}₹
-                        {Math.abs(bal).toLocaleString("en-IN")}
+                      <span className={`font-semibold ${
+                        amount >= 0
+                          ? "text-emerald-600"
+                          : "text-red-500"
+                      }`}>
+                        {amount >= 0 ? "+" : "-"}₹{money(Math.abs(amount))}
                       </span>
 
                     </div>
+                  );
+                })
 
-                  )
-                )}
+              )}
 
             </section>
 
           </div>
-
         )}
 
       </main>
-
     </div>
   );
 }
