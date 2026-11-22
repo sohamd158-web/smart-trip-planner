@@ -33,6 +33,7 @@ export default function TripDetailPage({ tripId, onBack }) {
   const [trip, setTrip] = useState(null);
   const [settlementData, setSettlementData] = useState(null);
   const [discoverData, setDiscoverData] = useState(null);
+  const [activityPhotos, setActivityPhotos] = useState({});
 
   const [activeTab, setActiveTab] = useState("itinerary");
   const [distanceFilter, setDistanceFilter] = useState("all");
@@ -320,7 +321,8 @@ export default function TripDetailPage({ tripId, onBack }) {
   ];
   const getPhotoForActivity = (act, idx = 0) => {
     const slot = ((Number(act.dayNumber) - 1) * 2 + idx) % UNIQUE_CARD_PHOTOS.length;
-    return UNIQUE_CARD_PHOTOS[slot];
+    const discMatch = (discoverData?.nearbyPlaces || []).find((p) => p.title.toLowerCase() === act.title.toLowerCase());
+    return activityPhotos[act.id] || (discMatch && discMatch.imageUrl) || UNIQUE_CARD_PHOTOS[slot];
   };
 
   const filteredPlaces = (

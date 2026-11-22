@@ -2,6 +2,7 @@ const { INDIA_PLACES } = require('../data/indiaPlaces');
 const { WORLD_194_PLACES } = require('../data/world194');
 
 const DISCOVERY_CACHE = new Map();
+const PHOTO_CACHE = new Map();
 
 const COUNTRY_ALIASES = {
   america: "united states",
@@ -17,8 +18,6 @@ const COUNTRY_ALIASES = {
 };
 
 const PHOTO_POOL = [
-  "https://unsplash.com",
-  "https://unsplash.com",
   "https://unsplash.com",
   "https://unsplash.com",
   "https://unsplash.com",
@@ -68,7 +67,7 @@ async function fetchJsonFast(url, ms = 2200) {
   try {
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { "User-Agent": "TripSplitAI/4.1 (student-portfolio-app)" }
+      headers: { "User-Agent": "TripSplitAI/4.5 (student-portfolio-app)" }
     });
     clearTimeout(timer);
     return res.ok ? await res.json() : null;
@@ -76,6 +75,20 @@ async function fetchJsonFast(url, ms = 2200) {
     clearTimeout(timer);
     return null;
   }
+}
+
+async function getRealWikiPhoto(query, fallbackIndex = 0) {
+  const key = query.toLowerCase().trim();
+  if (PHOTO_CACHE.has(key)) return PHOTO_CACHE.get(key);
+
+  const url = "https://wikipedia.org" + encodeURIComponent(query) + "&gsrlimit=4&prop=pageimages&piprop=thumbnail&pithumbsize=700&format=json&origin=*";
+  const data = await fetchJsonFast(url, 1800);
+  const pages = data && data.query && data.query.pages ? Object.values(data.query.pages) : [];
+  const match = pages.find((p) => p.thumbnail && p.thumbnail.source && !p.thumbnail.source.includes(".svg"));
+
+  const photo = (match && match.thumbnail.source) || PHOTO_POOL[fallbackIndex % PHOTO_POOL.length];
+  PHOTO_CACHE.set(key, photo);
+  return photo;
 }
 
 async function resolveDestination(destination) {
@@ -125,30 +138,34 @@ async function resolveDestination(destination) {
 }
 
 async function getWikiLandmarks(lat, lng, anchorName) {
-  const url = "https://wikipedia.org" + lat + "|" + lng + "&ggsradius=10000&ggslimit=16&prop=pageimages|extracts&piprop=thumbnail&pithumbsize=700&exintro=1&explaintext=1&exsentences=1&format=json&origin=*";
-  const data = await fetchJsonFast(url, 2200);
+  const url = "https://wikipedia.org" + lat + "|" + lng + "&ggsradius=10000&ggslimit=25&prop=pageimages|extracts&piprop=thumbnail&pithumbsize=700&exintro=1&explaintext=1&exsentences=1&format=json&origin=*";
+  const data = await fetchJsonFast(url, 2400);
   const pages = data && data.query && data.query.pages ? Object.values(data.query.pages) : [];
 
   return pages
-    .filter((p) => p.title && !p.title.toLowerCase().includes("district") && !p.title.toLowerCase().includes("constituency") && !p.title.toLowerCase().includes("election"))
-    .slice(0, 12)
+    .filter((p) => {
+      const t = (p.title || "").toLowerCase();
+      return t && !t.includes("district") && !t.includes("constituency") && !t.includes("election") && !t.includes("list of");
+    })
+    .slice(0, 18)
     .map((p, i) => {
-      const km = Math.max(2, (i + 1) * 6);
+      const km = Math.max(2, (i + 1) * 5);
+      const validThumb = p.thumbnail && p.thumbnail.source && !p.thumbnail.source.includes(".svg") ? p.thumbnail.source : null;
       return {
         city: anchorName,
         title: p.title,
-        category: i % 2 === 0 ? "Landmark" : "Culture",
-        cost: 1100 + (i % 4) * 350,
+        category: i % 3 === 0 ? "Landmark" : i % 3 === 1 ? "Culture" : "Sightseeing",
+        cost: 1100 + (i % 5) * 350,
         food: "Local Regional Specialties",
         distanceKm: km,
         distanceLabel: km + " km from " + anchorName,
-        imageUrl: (p.thumbnail && p.thumbnail.source) || PHOTO_POOL[(i + 2) % PHOTO_POOL.length],
+        imageUrl: validThumb || PHOTO_POOL[i % PHOTO_POOL.length],
         notes: p.extract ? p.extract.slice(0, 115) : "Verified landmark & cultural site near " + anchorName
       };
     });
 }
 
-function build24UniqueStops(anchorName, countryName) {
+function build20UniqueStops(anchorName, countryName) {
   const templates = [
     ["Historic Old Quarter & Architecture Walk", "Heritage", 950, 0, "Guided walking tour through iconic historic squares and monuments"],
     ["Famous Street Food & Night Market Crawl", "Food", 1150, 3, "Sample signature regional dishes, street snacks, and local desserts"],
@@ -174,24 +191,22 @@ function build24UniqueStops(anchorName, countryName) {
 
   return templates.map(([suffix, category, cost, km, desc], idx) => ({
     city: anchorName,
-    title: anchorName + " — " + suffix,
-    category,
-    cost,
-    food: "Authentic " + countryName + " Cuisine",
-    distanceKm: km,
-    distanceLabel: km === 0 ? "In " + anchorName : km + " km from " + anchorName,
-    imageUrl: PHOTO_POOL[idx % PHOTO_POOL.length],
-    notes: desc
-  }));
+
+title: anchorName + " — " + suffix,
+category,
+cost,
+food: "Authentic " + countryName + " Cuisine",
+distanceKm: km,
+distanceLabel: km === 0 ? "In " + anchorName : km + " km from " + anchorName,
+imageUrl: PHOTO_POOL[idx % PHOTO_POOL.length],
+notes: desc
+}));
 }
-
 async function discoverWithin400Km(destination, preferences = "") {
-  const cacheKey = destination.toLowerCase().trim() + "::" + preferences.toLowerCase().trim();
-  if (DISCOVERY_CACHE.has(cacheKey)) return DISCOVERY_CACHE.get(cacheKey);
-
-  const prefGeo = preferences && preferences.trim().length > 2 ? await resolveDestination(preferences) : null;
-  const geo = prefGeo || (await resolveDestination(destination));
-
+const cacheKey = destination.toLowerCase().trim() + "::" + preferences.toLowerCase().trim();
+if (DISCOVERY_CACHE.has(cacheKey)) return DISCOVERY_CACHE.get(cacheKey);
+const prefGeo = preferences && preferences.trim().length > 2 ? await resolveDestination(preferences) : null;
+const geo = prefGeo || (await resolveDestination(destination));
 const activeQuery = prefGeo ? preferences.trim() : destination;
 const targetCountry = (geo && geo.country) || activeQuery;
 const anchorName = (geo && geo.name) || activeQuery;
@@ -210,9 +225,15 @@ distanceLabel: distKm === 0 ? "In " + geo.name : distKm + " km from " + geo.name
 imageUrl: PHOTO_POOL[idx % PHOTO_POOL.length]
 };
 }).filter((p) => p.distanceKm <= 400);
+await Promise.all(
+curatedNearby.slice(0, 8).map(async (item, i) => {
+item.imageUrl = await getRealWikiPhoto(item.city + " " + item.country, i);
+})
+);
 }
-const diverseStops = build24UniqueStops(anchorName, targetCountry);
+const diverseStops = build20UniqueStops(anchorName, targetCountry);
 const seen = new Set();
+// Prioritize real curated places & real Wikipedia landmarks first, then diverse regional stops
 let places = [...curatedNearby, ...wikiPlaces, ...diverseStops]
 .filter((item) => {
 const key = item.title.toLowerCase();
@@ -220,14 +241,13 @@ if (seen.has(key)) return false;
 seen.add(key);
 return true;
 })
-.slice(0, 28)
-.sort((a, b) => a.distanceKm - b.distanceKm);
+.slice(0, 30);
 if (preferences && preferences.trim() && !prefGeo) {
 const words = preferences.toLowerCase().split(/[\s,]+/).filter(Boolean);
 places.sort((a, b) => {
 const aMatch = words.some((w) => (a.title + " " + a.category + " " + a.notes).toLowerCase().includes(w)) ? 0 : 1;
 const bMatch = words.some((w) => (b.title + " " + b.category + " " + b.notes).toLowerCase().includes(w)) ? 0 : 1;
-return aMatch - bMatch || a.distanceKm - b.distanceKm;
+return aMatch - bMatch;
 });
 }
 const temp = weatherData && weatherData.current_weather ? weatherData.current_weather.temperature : undefined;
@@ -288,7 +308,6 @@ const discovery = await discoverWithin400Km(destination, preferences);
 const pool = [...discovery.nearbyPlaces];
 const totalActivities = days * 2;
 const budgetScale = budget > 0 ? Math.min(1.4, Math.max(0.65, budget / (totalActivities * 1500))) : 1;
-// Strictly pick unique non-repeating stops without wrapping around
 const schedule = [];
 const usedTitles = new Set();
 for (let i = 0; i < totalActivities; i++) {
@@ -311,7 +330,7 @@ title: place.title,
 category: place.category,
 estimatedCost: Math.round((place.cost * budgetScale) / 50) * 50,
 notes: place.distanceLabel + " • " + place.notes,
-imageUrl: PHOTO_POOL[i % PHOTO_POOL.length]
+imageUrl: place.imageUrl || PHOTO_POOL[i % PHOTO_POOL.length]
 });
 }
 return schedule;
