@@ -203,12 +203,8 @@ const RAW_WORLD_194 = [
 ["Tuvalu", "Funafuti", -8.5211, 179.1962, "AUD ($)", "+688", "Funafuti Marine Conservation Area Atoll", "Nature", "Pulaka & Coconut Crab"],
 ["Vanuatu", "Port Vila", -17.7333, 168.3273, "VUV (VT)", "+678", "Mount Yasur Active Volcano & Champagne Beach", "Adventure", "Laplap & Coconut Curry"]
 ];
-const fs = require("fs");
-let content = fs.readFileSync("server/data/world194.js", "utf8");
-const cutIndex = content.indexOf("const WORLD_194_PLACES");
-if (cutIndex !== -1) content = content.slice(0, cutIndex);
 
-const footer = `const WORLD_194_PLACES = RAW_WORLD_194.map(([country, city, lat, lng, currency, dialCode, title, category, food]) => ({
+const WORLD_194_PLACES = RAW_WORLD_194.map(([country, city, lat, lng, currency, dialCode, title, category, food]) => ({
   country,
   city,
   state: country,
@@ -224,6 +220,3 @@ const footer = `const WORLD_194_PLACES = RAW_WORLD_194.map(([country, city, lat,
 }));
 
 module.exports = { WORLD_194_PLACES };
-`;
-
-fs.writeFileSync("server/data/world194.js", content + footer);
