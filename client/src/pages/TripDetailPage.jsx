@@ -332,10 +332,7 @@ export default function TripDetailPage({ tripId, onBack }) {
     return p.distanceKm <= 400;
   });
 
-  const dayOptions = Array.from(
-    { length: 7 },
-    (_, i) => i + 1
-  );
+  const dayOptions = Array.from({ length: 7 }, (_, i) => i + 1);
 
   // ================= MAIN UI =================
 
