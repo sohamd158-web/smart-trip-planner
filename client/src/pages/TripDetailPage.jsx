@@ -300,7 +300,8 @@ export default function TripDetailPage({ tripId, onBack }) {
     return acc;
   }, {});
 
-  const getPhotoForActivity = (act) => {
+  const UNIQUE_CARD_PHOTOS = Object.values(FALLBACK_PHOTOS);
+  const getPhotoForActivity = (act, idx = 0) => {
     const match = (discoverData?.nearbyPlaces || []).find(
       (p) =>
         p.title?.toLowerCase() === act.title?.toLowerCase()
@@ -684,7 +685,7 @@ export default function TripDetailPage({ tripId, onBack }) {
 
                       <div className="space-y-4">
 
-                        {items.map((act) => (
+                        {items.map((act, idx) => (
 
                           <div
                             key={act.id}
@@ -692,7 +693,7 @@ export default function TripDetailPage({ tripId, onBack }) {
                           >
 
                             <img
-                              src={getPhotoForActivity(act)}
+                              src={getPhotoForActivity(act, idx)} onError={(e) => { e.currentTarget.src = UNIQUE_CARD_PHOTOS[idx % UNIQUE_CARD_PHOTOS.length]; }}
                               alt={act.title}
                               className="w-full sm:w-28 h-24 object-cover rounded-lg"
                             />
