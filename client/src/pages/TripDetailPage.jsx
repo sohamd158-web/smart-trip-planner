@@ -748,7 +748,7 @@ export default function TripDetailPage({ tripId, onBack }) {
 
                     <div className="space-y-4">
 
-                      {items.map((act) => (
+                      {items.map((act, itemIdx) => (
 
                         <div key={act.id} className="flex flex-col sm:flex-row gap-4 border-b last:border-0 pb-4 last:pb-0">
 
