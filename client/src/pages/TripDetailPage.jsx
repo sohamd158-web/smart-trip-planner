@@ -300,7 +300,7 @@ export default function TripDetailPage({ tripId, onBack }) {
     return acc;
   }, {});
 
-  const DISTINCT_PHOTOS = [
+  const VERSATILE_PHOTOS = [
     "https://unsplash.com",
     "https://unsplash.com",
     "https://unsplash.com",
@@ -321,13 +321,13 @@ export default function TripDetailPage({ tripId, onBack }) {
     "https://unsplash.com"
   ];
 
-  const allUniquePhotos = [...destGallery, ...DISTINCT_PHOTOS];
-  const orderedIds = trip.activities.map((a) => a.id);
+  const allDistinctPhotos = [...destGallery, ...VERSATILE_PHOTOS];
+  const allActivityIds = trip.activities.map((a) => a.id);
 
-  const getPhotoForActivity = (act, idx = 0) => {
-    const seq = orderedIds.indexOf(act.id);
-    const uniqueIndex = seq >= 0 ? seq : (Number(act.dayNumber) - 1) * 2 + idx;
-    return allUniquePhotos[uniqueIndex % allUniquePhotos.length];
+  const getPhotoForActivity = (act) => {
+    const pos = allActivityIds.indexOf(act.id);
+    const index = pos >= 0 ? pos : Number(act.dayNumber) || 0;
+    return allDistinctPhotos[index % allDistinctPhotos.length];
   };
 
   const filteredPlaces = (
@@ -705,7 +705,7 @@ export default function TripDetailPage({ tripId, onBack }) {
                           >
 
                             <img
-                              src={getPhotoForActivity(act, idx)} onError={(e) => { e.currentTarget.src = UNIQUE_CARD_PHOTOS[idx % UNIQUE_CARD_PHOTOS.length]; }}
+                              src={getPhotoForActivity(act)} onError={(e) => { e.currentTarget.src = UNIQUE_CARD_PHOTOS[idx % UNIQUE_CARD_PHOTOS.length]; }}
                               alt={act.title}
                               className="w-full sm:w-28 h-24 object-cover rounded-lg"
                             />
