@@ -618,13 +618,13 @@ export default function TripDetailPage({ tripId, onBack }) {
               <div className="flex items-center gap-2 mb-2">
                 <Sparkles className="w-5 h-5" />
                 <h2 className="text-lg font-bold">
-                  Auto-Generate 400 km Radius Plan
+                  Auto-Generate 100 km Radius Plan
                 </h2>
               </div>
 
               <p className="text-sm text-indigo-100 mb-4">
                 Discover attractions, hill stations, heritage forts,
-                waterfalls and landmarks within 400 km of {trip.destination}.
+                waterfalls and landmarks within 100 km of {trip.destination}.
               </p>
 
               <form onSubmit={handleGenerateAI} className="flex flex-col sm:flex-row gap-3">

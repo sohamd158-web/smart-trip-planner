@@ -292,35 +292,38 @@ DISCOVERY_CACHE.set(cacheKey, result);
 return result;
 }
 async function generateGeoItinerary(destination, days, budget, preferences) {
-const discovery = await discoverWithin400Km(destination, preferences);
-const pool = [...discovery.nearbyPlaces];
-const totalActivities = days * 2;
-const budgetScale = budget > 0 ? Math.min(1.4, Math.max(0.65, budget / (totalActivities * 1500))) : 1;
-const schedule = [];
-const usedTitles = new Set();
-for (let i = 0; i < totalActivities; i++) {
-const dayNumber = Math.floor(i / 2) + 1;
-let place = pool[i];
-if (!place || usedTitles.has(place.title.toLowerCase())) {
-place = {
-title: discovery.destination + " — Day " + dayNumber + " Scenic Hill & Valley Stop #" + (i + 1),
-category: i % 2 === 0 ? "Adventure" : "Culture",
-cost: 1600 + (i % 5) * 250,
-distanceLabel: Math.min(280, 15 + i * 14) + " km from " + discovery.destination,
-notes: "Curated regional sightseeing & cultural stop around " + discovery.destination,
-imageUrl: PHOTO_POOL[i % PHOTO_POOL.length]
-};
+  const discovery = await discoverWithin400Km(destination, preferences);
+  const within100 = discovery.nearbyPlaces.filter((p) => Number(p.distanceKm) <= 100);
+  const totalActivities = days * 2;
+  const budgetScale = budget > 0 ? Math.min(1.4, Math.max(0.65, budget / (totalActivities * 1500))) : 1;
+
+  const schedule = [];
+  const usedTitles = new Set();
+  for (let i = 0; i < totalActivities; i++) {
+    const dayNumber = Math.floor(i / 2) + 1;
+    let place = within100[i];
+    if (!place || usedTitles.has(place.title.toLowerCase())) {
+      const localKm = Math.min(95, 5 + i * 8);
+      place = {
+        title: discovery.destination + " — Local Stop #" + (i + 1) + (i % 2 === 0 ? " Scenic Viewpoint" : " Heritage & Food Walk"),
+        category: i % 2 === 0 ? "Sightseeing" : "Culture",
+        cost: 1200 + (i % 4) * 250,
+        distanceLabel: localKm + " km from " + discovery.destination,
+        notes: "Curated local attraction within 100 km of " + discovery.destination,
+        imageUrl: PHOTO_POOL[i % PHOTO_POOL.length]
+      };
+    }
+    usedTitles.add(place.title.toLowerCase());
+    schedule.push({
+      dayNumber,
+      title: place.title,
+      category: place.category,
+      estimatedCost: Math.round((place.cost * budgetScale) / 50) * 50,
+      notes: place.distanceLabel + " • " + place.notes,
+      imageUrl: place.imageUrl || PHOTO_POOL[i % PHOTO_POOL.length]
+    });
+  }
+  return schedule;
 }
-usedTitles.add(place.title.toLowerCase());
-schedule.push({
-dayNumber,
-title: place.title,
-category: place.category,
-estimatedCost: Math.round((place.cost * budgetScale) / 50) * 50,
-notes: place.distanceLabel + " • " + place.notes,
-imageUrl: place.imageUrl || PHOTO_POOL[i % PHOTO_POOL.length]
-});
-}
-return schedule;
-}
+
 module.exports = { discoverWithin400Km, generateGeoItinerary };
