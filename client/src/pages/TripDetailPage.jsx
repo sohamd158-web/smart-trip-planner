@@ -188,31 +188,24 @@ export default function TripDetailPage({ tripId, onBack }) {
 
   const handleGenerateAI = async (e) => {
     e.preventDefault();
-
     setGeneratingAI(true);
-
     try {
-      await api.post(`/trips/${tripId}/ai-itinerary`, {
-        preferences,
-        replaceExisting: true
-      });
-
+      const searched = preferences.trim();
+      const { data } = await api.post("/trips/" + tripId + "/ai-itinerary", { preferences: searched, replaceExisting: true });
       setPreferences("");
       await loadTripData();
-
-    } catch (error) {
-      alert(
-        error.response?.data?.error ||
-        "Failed to generate itinerary"
-      );
+      if (data && data.discovery) {
+        setDiscoverData(data.discovery);
+      } else if (searched) {
+        const discRes = await api.get("/trips/" + tripId + "/discover?q=" + encodeURIComponent(searched));
+        setDiscoverData(discRes.data);
+      }
+    } catch (err) {
+      alert(err.response?.data?.error || "Failed to generate itinerary");
     } finally {
       setGeneratingAI(false);
     }
   };
-
-  // =====================================
-  // ADD ACTIVITY
-  // =====================================
 
   const handleAddActivity = async (e) => {
     e.preventDefault();

@@ -36,14 +36,11 @@ router.post('/:tripId/ai-itinerary', async (req, res) => {
       Math.ceil((new Date(trip.endDate) - new Date(trip.startDate)) / (1000 * 60 * 60 * 24)) + 1
     );
 
-    // Fast sub-second 400km geo-engine with real destination photos
-    const discovery = await discoverWithin400Km(trip.destination, preferences || '');
-    const generatedActivities = await generateGeoItinerary(
-      trip.destination,
-      days,
-      trip.budget,
-      preferences || ''
-    );
+    const searchPref = (preferences || '').trim();
+    const [discovery, generatedActivities] = await Promise.all([
+      discoverWithin400Km(trip.destination, searchPref),
+      generateGeoItinerary(trip.destination, days, trip.budget, searchPref)
+    ]);
 
     if (replaceExisting !== false) {
       await prisma.activity.deleteMany({ where: { tripId: trip.id } });
@@ -67,13 +64,9 @@ router.post('/:tripId/ai-itinerary', async (req, res) => {
 
     res.status(201).json({
       message: 'Itinerary generated',
-      source: 'geo-100km-fast',
+      source: 'geo-100km-synced',
       discovery,
-      activities: allActivities,
-      photos: generatedActivities.reduce((acc, a) => {
-        acc[a.title] = a.imageUrl;
-        return acc;
-      }, {})
+      activities: allActivities
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -82,18 +75,18 @@ router.post('/:tripId/ai-itinerary', async (req, res) => {
 
 function fallbackExpenseParser(text, members) {
   const amountMatch = text.match(/(\d+(?:\.\d+)?)/);
-  const amount = amountMatch ? parseFloat(amountMatch) : 0;
+  const amount = amountMatch ? parseFloat(amountMatch[0]) : 0;
   const lower = text.toLowerCase();
   const paidMatch = text.match(/([a-zA-Z]+)\s+paid/i);
-  const paidCandidate = paidMatch ? paidMatch.toLowerCase() : '';
+  const paidCandidate = paidMatch ? paidMatch[1].toLowerCase() : '';
   const paidBy =
     members.find((m) => m.toLowerCase() === paidCandidate) ||
     members.find((m) => lower.startsWith(m.toLowerCase())) ||
-    members;
+    members[0];
   const mentioned = members.filter((m) => lower.includes(m.toLowerCase()));
   const splitAmong = mentioned.length > 1 ? mentioned : members;
   const descMatch = text.match(/for\s+(.+?)(?:\s+split|\s+between|\s+among|$)/i);
-  const description = descMatch ? descMatch.trim() : text.slice(0, 40);
+  const description = descMatch ? descMatch[1].trim() : text.slice(0, 40);
   return { description, amount, paidBy, splitAmong };
 }
 
@@ -142,7 +135,7 @@ router.post('/:tripId/ai-expense', async (req, res) => {
       data: {
         description: parsed.description,
         amount: parsed.amount,
-        paidBy: trip.members.includes(parsed.paidBy) ? parsed.paidBy : trip.members,
+        paidBy: trip.members.includes(parsed.paidBy) ? parsed.paidBy : trip.members[0],
         splitAmong: validSplit.length > 0 ? validSplit : trip.members,
         tripId: trip.id,
       },
