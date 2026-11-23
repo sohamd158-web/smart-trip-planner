@@ -21,12 +21,11 @@ api.interceptors.response.use(
     if (!config) return Promise.reject(err);
 
     config._retryCount = config._retryCount || 0;
-    const isNetworkOrColdStart = !err.response || [502, 503, 504].includes(err.response.status);
+    const shouldRetry = !err.response || err.response.status >= 500;
 
-    if (isNetworkOrColdStart && config._retryCount < 5) {
+    if (shouldRetry && config._retryCount < 6) {
       config._retryCount += 1;
-      const waitMs = config._retryCount * 4000;
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      await new Promise((resolve) => setTimeout(resolve, config._retryCount * 3500));
       return api(config);
     }
     return Promise.reject(err);
