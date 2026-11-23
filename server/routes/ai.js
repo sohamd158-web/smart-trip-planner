@@ -37,6 +37,7 @@ router.post('/:tripId/ai-itinerary', async (req, res) => {
     );
 
     // Fast sub-second 400km geo-engine with real destination photos
+    const discovery = await discoverWithin400Km(trip.destination, preferences || '');
     const generatedActivities = await generateGeoItinerary(
       trip.destination,
       days,
@@ -66,7 +67,8 @@ router.post('/:tripId/ai-itinerary', async (req, res) => {
 
     res.status(201).json({
       message: 'Itinerary generated',
-      source: 'geo-400km-fast',
+      source: 'geo-100km-fast',
+      discovery,
       activities: allActivities,
       photos: generatedActivities.reduce((acc, a) => {
         acc[a.title] = a.imageUrl;
