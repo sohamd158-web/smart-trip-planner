@@ -12,8 +12,8 @@ model User {
   name         String
   email        String   @unique
   passwordHash String
-  trips        Trip[]
   createdAt    DateTime @default(now())
+  trips        Trip[]
 }
 
 model Trip {
@@ -25,21 +25,21 @@ model Trip {
   budget      Float
   members     String[]
   userId      String
-  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime   @default(now())
   activities  Activity[]
   expenses    Expense[]
-  createdAt   DateTime   @default(now())
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Activity {
-  id            String   @id @default(uuid())
+  id            String  @id @default(uuid())
   dayNumber     Int
   title         String
   category      String
-  estimatedCost Float    @default(0)
+  estimatedCost Float   @default(0)
   notes         String?
   tripId        String
-  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  trip          Trip    @relation(fields: [tripId], references: [id], onDelete: Cascade)
 }
 
 model Expense {
@@ -49,6 +49,6 @@ model Expense {
   paidBy      String
   splitAmong  String[]
   tripId      String
-  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
 }
