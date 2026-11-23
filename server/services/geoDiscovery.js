@@ -194,13 +194,16 @@ function buildLocalRegionalStops(anchorName, countryName) {
 }
 
 async function discoverWithin400Km(destination, preferences = "") {
-  const combinedQuery = preferences && preferences.trim() ? destination + " " + preferences : destination;
+  const cleanPref = (preferences || "").trim();
+  const prefGeo = cleanPref.length > 2 ? await resolveDestination(cleanPref) : null;
+  const activeDest = prefGeo ? cleanPref : destination;
+  const combinedQuery = cleanPref && !prefGeo ? destination + " " + cleanPref : activeDest;
   const cacheKey = combinedQuery.toLowerCase().trim();
   if (DISCOVERY_CACHE.has(cacheKey)) return DISCOVERY_CACHE.get(cacheKey);
 
-  const geo = await resolveDestination(combinedQuery);
-  const targetCountry = (geo && geo.country) || destination;
-  const anchorName = (geo && geo.name) || destination;
+  const geo = prefGeo || (await resolveDestination(activeDest));
+  const targetCountry = (geo && geo.country) || activeDest;
+  const anchorName = (geo && geo.name) || activeDest;
   const allTokens = combinedQuery.toLowerCase().split(/[\s,/-]+/).filter((w) => w.length > 2);
 
   const [weatherData, wikiPlaces] = await Promise.all([
