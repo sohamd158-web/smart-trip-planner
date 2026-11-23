@@ -22,7 +22,7 @@ export default function AuthPage({ onAuthSuccess }) {
       localStorage.setItem('user', JSON.stringify(data.user));
       onAuthSuccess(data.user);
     } catch (err) {
-      setError(err.response?.data?.error || 'Authentication failed');
+      setError(err.response?.data?.error || (err.message === "Network Error" ? "Waking up server — please click again in 15 seconds" : err.message));
     } finally {
       setLoading(false);
     }

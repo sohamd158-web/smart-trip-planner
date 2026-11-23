@@ -12,15 +12,7 @@ const aiRoutes = require('./routes/ai');
 const app = express();
 const prisma = new PrismaClient();
 
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || origin.includes("localhost") || origin.endsWith(".vercel.app")) {
-      return cb(null, true);
-    }
-    return cb(null, true);
-  },
-  credentials: true
-}));
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 app.get('/api/health', async (req, res) => {
