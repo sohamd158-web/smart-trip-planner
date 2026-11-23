@@ -73,70 +73,100 @@ router.post('/:tripId/ai-itinerary', async (req, res) => {
   }
 });
 
-function fallbackExpenseParser(text, members) {
+function smartExpenseParser(text, members) {
+  const safeMembers = Array.isArray(members) && members.length > 0 ? members : ['Member'];
   const amountMatch = text.match(/(\d+(?:\.\d+)?)/);
-  const amount = amountMatch ? parseFloat(amountMatch[0]) : 0;
+  const amount = amountMatch ? parseFloat(amountMatch.at(1)) : 0;
+
   const lower = text.toLowerCase();
-  const paidMatch = text.match(/([a-zA-Z]+)\s+paid/i);
-  const paidCandidate = paidMatch ? paidMatch[1].toLowerCase() : '';
+  const paidBeforeMatch = text.match(/([a-zA-Z]+)\s+paid/i);
+  const paidAfterMatch = text.match(/paid\s+by\s+([a-zA-Z]+)/i);
+  const candidate = (paidBeforeMatch ? paidBeforeMatch.at(1) : paidAfterMatch ? paidAfterMatch.at(1) : '').toLowerCase();
+
   const paidBy =
-    members.find((m) => m.toLowerCase() === paidCandidate) ||
-    members.find((m) => lower.startsWith(m.toLowerCase())) ||
-    members[0];
-  const mentioned = members.filter((m) => lower.includes(m.toLowerCase()));
-  const splitAmong = mentioned.length > 1 ? mentioned : members;
-  const descMatch = text.match(/for\s+(.+?)(?:\s+split|\s+between|\s+among|$)/i);
-  const description = descMatch ? descMatch[1].trim() : text.slice(0, 40);
+    safeMembers.find((m) => m.toLowerCase() === candidate) ||
+    safeMembers.find((m) => lower.startsWith(m.toLowerCase())) ||
+    safeMembers.at(0);
+
+  const mentioned = safeMembers.filter((m) => lower.includes(m.toLowerCase()));
+  const splitAmong = mentioned.length > 1 ? mentioned : safeMembers;
+
+  const forMatch = text.match(/for\s+(.+?)(?:\s+split|\s+between|\s+among|\s+paid|$)/i);
+  let description = forMatch ? forMatch.at(1).trim() : '';
+  if (!description) {
+    description = text
+      .replace(/(\d+(?:\.\d+)?)/g, '')
+      .replace(/\b(paid|by|for|split|between|among|and|rs|inr|₹)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  if (!description) description = 'Trip Expense';
+  description = description.charAt(0).toUpperCase() + description.slice(1);
+
   return { description, amount, paidBy, splitAmong };
 }
 
 router.post('/:tripId/ai-expense', async (req, res) => {
   try {
     const { text } = req.body;
-    if (!text) return res.status(400).json({ error: 'Expense text is required' });
+    if (!text || !text.trim()) return res.status(400).json({ error: 'Expense text is required' });
 
     const trip = await prisma.trip.findFirst({
       where: { id: req.params.tripId, userId: req.userId },
     });
     if (!trip) return res.status(404).json({ error: 'Trip not found' });
 
-    let parsed;
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3500);
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: `Extract expense from: "${text}". Valid members ONLY: ${JSON.stringify(trip.members)}.`,
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              description: { type: Type.STRING },
-              amount: { type: Type.NUMBER },
-              paidBy: { type: Type.STRING },
-              splitAmong: { type: Type.ARRAY, items: { type: Type.STRING } },
+    const safeMembers = Array.isArray(trip.members) && trip.members.length > 0 ? trip.members : ['Member'];
+    let parsed = smartExpenseParser(text, safeMembers);
+
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3000);
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: `Extract expense from: "${text}". Valid members ONLY: ${JSON.stringify(safeMembers)}. Default paidBy to "${safeMembers.at(0)}" and splitAmong to all members if unspecified.`,
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                description: { type: Type.STRING },
+                amount: { type: Type.NUMBER },
+                paidBy: { type: Type.STRING },
+                splitAmong: { type: Type.ARRAY, items: { type: Type.STRING } },
+              },
+              required: ['description', 'amount', 'paidBy', 'splitAmong'],
             },
-            required: ['description', 'amount', 'paidBy', 'splitAmong'],
+            thinkingConfig: { thinkingBudget: 0 },
+            httpOptions: { signal: controller.signal },
           },
-          thinkingConfig: { thinkingBudget: 0 },
-          httpOptions: { signal: controller.signal },
-        },
-      });
-      clearTimeout(timer);
-      parsed = JSON.parse(response.text);
-    } catch (_) {
-      parsed = fallbackExpenseParser(text, trip.members);
+        });
+        clearTimeout(timer);
+        const aiResult = JSON.parse(response.text);
+        if (aiResult && Number(aiResult.amount) > 0) {
+          parsed = aiResult;
+        }
+      } catch (_) {
+        // Use instant smartExpenseParser fallback
+      }
     }
 
-    const validSplit = (parsed.splitAmong || []).filter((m) => trip.members.includes(m));
+    const finalAmount = Number(parsed.amount) || 0;
+    if (finalAmount <= 0) {
+      return res.status(400).json({ error: 'Please include an amount (e.g., "Soham paid 1200 for lunch")' });
+    }
+
+    const validPaidBy = safeMembers.find((m) => m.toLowerCase() === String(parsed.paidBy || '').toLowerCase()) || safeMembers.at(0);
+    const validSplit = (Array.isArray(parsed.splitAmong) ? parsed.splitAmong : []).filter((m) => safeMembers.includes(m));
+
     const expense = await prisma.expense.create({
       data: {
-        description: parsed.description,
-        amount: parsed.amount,
-        paidBy: trip.members.includes(parsed.paidBy) ? parsed.paidBy : trip.members[0],
-        splitAmong: validSplit.length > 0 ? validSplit : trip.members,
+        description: String(parsed.description || 'Trip Expense').slice(0, 80),
+        amount: finalAmount,
+        paidBy: validPaidBy,
+        splitAmong: validSplit.length > 0 ? validSplit : safeMembers,
         tripId: trip.id,
       },
     });
