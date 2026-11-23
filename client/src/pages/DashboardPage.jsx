@@ -35,7 +35,7 @@ export default function DashboardPage({ user, onLogout, onSelectTrip }) {
       setShowModal(false);
       setForm({ title: "", destination: "", startDate: "", endDate: "", budget: "", membersText: user.name });
       fetchTrips();
-    } catch (err) { alert(err.response?.data?.error || "Failed to create trip"); }
+    } catch (err) { if (err.response?.status === 401) { alert("Session refreshed — please log in again."); onLogout(); return; } alert(err.response?.data?.error || err.message || "Failed to create trip"); }
     finally { setSubmitting(false); }
   };
 

@@ -10,8 +10,7 @@ const aiRoutes = require('./routes/ai');
 const app = express();
 const prisma = new PrismaClient();
 
-app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization'] }));
-app.options('*', cors());
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 app.get('/api/health', async (req, res) => {
